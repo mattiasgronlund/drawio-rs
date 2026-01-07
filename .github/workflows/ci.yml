@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --workspace --all-targets
+      - name: Test
+        run: cargo test --workspace
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+      - name: Generate coverage
+        run: cargo llvm-cov --workspace --all-targets --lcov --output-path lcov.info
+      - name: Verify coverage baseline
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          lcov_path = "lcov.info"
+          baseline_path = ".github/coverage-baseline.txt"
+
+          total_lines = 0
+          covered_lines = 0
+          with open(lcov_path, "r", encoding="utf-8") as handle:
+              for raw in handle:
+                  line = raw.strip()
+                  if line.startswith("LF:"):
+                      total_lines += int(line[3:])
+                  elif line.startswith("LH:"):
+                      covered_lines += int(line[3:])
+
+          if total_lines == 0:
+              percent = 0.0
+          else:
+              percent = covered_lines / total_lines * 100.0
+
+          with open(baseline_path, "r", encoding="utf-8") as handle:
+              baseline = float(handle.read().strip())
+
+          print(f"Coverage: {percent:.2f}% (baseline {baseline:.2f}%)")
+          if percent + 1e-9 < baseline:
+              raise SystemExit("Coverage degraded below baseline")
+          PY
