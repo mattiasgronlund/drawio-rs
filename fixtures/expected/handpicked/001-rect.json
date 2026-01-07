@@ -1,0 +1,51 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 886,
+        "dy": 866,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 827,
+        "page_scale": 1,
+        "page_width": 1169,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 40,
+                "y": 40
+              },
+              "id": "2",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "Nm4p6qM8uFUqQwi7o9y-",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

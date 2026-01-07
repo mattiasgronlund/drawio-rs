@@ -1,0 +1,4 @@
+target
+.vscode/*.vsix
+.devcontainer/.zsh_history
+

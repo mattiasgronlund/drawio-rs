@@ -1,0 +1,31 @@
+{
+  "name": "drawio-rs devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "customizations": {
+    "vscode": {
+      "chat.disableAIFeatures": true,
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "github.vscode-github-actions",
+        "openai.chatgpt",
+        // "${containerWorkspaceFolder}/.vscode/drawio-1.9.0-6.vsix",
+        // "${containerWorkspaceFolder}/.vscode/vscode-text-util-0.0.1.vsix",
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      }
+    }
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "upgradePackages": true
+    }
+  },
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "remoteUser": "vscode"
+}

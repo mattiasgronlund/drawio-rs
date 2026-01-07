@@ -1,0 +1,369 @@
+// crates/drawio-core/src/parse.rs
+//
+// quick-xml 0.38.4 compatible parser for "direct XML" .drawio files.
+// - Parses <mxfile> with one or more <diagram>
+// - Supports <diagram> containing <mxGraphModel> directly
+// - Captures non-whitespace <diagram> text as encoded_payload (does NOT decode yet)
+// - Preserves unknown attributes into `extra` maps
+//
+// Trimming policy for .drawio:
+// - DO NOT globally trim all text events (Config::trim_text(true) is unsafe)
+// - DO ignore whitespace-only text/CDATA nodes (indentation/pretty-printing)
+// - DO preserve non-whitespace text exactly where it is meaningful (encoded <diagram> payload)
+
+use crate::model::*;
+use quick_xml::Reader;
+use quick_xml::events::{BytesEnd, BytesStart, Event};
+use std::collections::BTreeMap;
+use std::io::BufRead;
+use std::str;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error("xml error: {0}")]
+    Xml(#[from] quick_xml::Error),
+
+    #[error("attribute error: {0}")]
+    Attr(#[from] quick_xml::events::attributes::AttrError),
+
+    #[error("utf8 error: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
+
+    #[error("missing required attribute: {0}")]
+    MissingAttr(&'static str),
+
+    #[error("invalid number for {field}: {value}")]
+    InvalidNumber { field: &'static str, value: String },
+
+    #[error("unexpected structure: {0}")]
+    Structure(String),
+
+    #[error("encoding error: {0}")]
+    Encoding(#[from] quick_xml::encoding::EncodingError),
+}
+
+pub type ParseResult<T> = Result<T, ParseError>;
+
+/// Parse a .drawio file that contains raw XML:
+/// `<mxfile>...<diagram>...<mxGraphModel>...</mxGraphModel>...</diagram></mxfile>`.
+///
+/// Many real `.drawio` files store the `<diagram>` body as an encoded string.
+/// This parser captures such payloads as `Diagram.encoded_payload` if present,
+/// but does not decode it yet.
+pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
+    let mut reader = Reader::from_str(xml);
+    // IMPORTANT: do not enable global trim_text. We'll ignore whitespace-only text manually.
+
+    let mut buf = Vec::new();
+
+    let mut mxfile: Option<MxFile> = None;
+    let mut current_diagram: Option<Diagram> = None;
+    let mut current_graph: Option<MxGraphModel> = None;
+
+    let mut current_cell_idx: Option<usize> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) => match local_name_start(&e)?.as_str() {
+                "mxfile" => {
+                    let attrs = attrs_to_map(&e)?;
+                    mxfile = Some(MxFile {
+                        host: attrs.get("host").cloned(),
+                        version: attrs.get("version").cloned(),
+                        file_type: attrs.get("type").cloned(),
+                        diagrams: Vec::new(),
+                    });
+                }
+                "diagram" => {
+                    let attrs = attrs_to_map(&e)?;
+                    current_diagram = Some(Diagram {
+                        id: attrs.get("id").cloned(),
+                        name: attrs.get("name").cloned(),
+                        encoded_payload: None,
+                        graph_model: None,
+                    });
+                }
+                "mxGraphModel" => {
+                    let attrs = attrs_to_map(&e)?;
+
+                    let mut gm = MxGraphModel {
+                        dx: parse_i64_opt(attrs.get("dx"), "dx")?,
+                        dy: parse_i64_opt(attrs.get("dy"), "dy")?,
+                        grid: parse_bool_opt(attrs.get("grid")),
+                        grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
+                        guides: parse_bool_opt(attrs.get("guides")),
+                        tooltips: parse_bool_opt(attrs.get("tooltips")),
+                        connect: parse_bool_opt(attrs.get("connect")),
+                        arrows: parse_bool_opt(attrs.get("arrows")),
+                        fold: parse_bool_opt(attrs.get("fold")),
+                        page: parse_bool_opt(attrs.get("page")),
+                        page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
+                        page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
+                        page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
+                        math: parse_bool_opt(attrs.get("math")),
+                        shadow: parse_bool_opt(attrs.get("shadow")),
+                        extra: BTreeMap::new(),
+                        root: Root { cells: Vec::new() },
+                    };
+
+                    // Preserve unknown attributes in extra
+                    for (k, v) in attrs {
+                        if !is_known_graphmodel_attr(&k) {
+                            gm.extra.insert(k, v);
+                        }
+                    }
+
+                    current_graph = Some(gm);
+                }
+                "mxCell" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxCell outside mxGraphModel".into())
+                    })?;
+                    let cell = parse_mxcell(&reader, &e)?;
+                    gm.root.cells.push(cell);
+                    current_cell_idx = Some(gm.root.cells.len() - 1);
+                }
+                "mxGeometry" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                    })?;
+                    let geom = parse_mxgeometry(&reader, &e)?;
+                    let idx = current_cell_idx.ok_or_else(|| {
+                        ParseError::Structure("mxGeometry found but no current mxCell".into())
+                    })?;
+                    gm.root.cells[idx].geometry = Some(geom);
+                }
+                _ => {}
+            },
+
+            Event::Empty(e) => match local_name_start(&e)?.as_str() {
+                "diagram" => {
+                    let attrs = attrs_to_map(&e)?;
+                    let d = Diagram {
+                        id: attrs.get("id").cloned(),
+                        name: attrs.get("name").cloned(),
+                        encoded_payload: None,
+                        graph_model: None,
+                    };
+                    if let Some(file) = mxfile.as_mut() {
+                        file.diagrams.push(d);
+                    } else {
+                        return Err(ParseError::Structure("diagram outside mxfile".into()));
+                    }
+                }
+                "mxCell" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxCell outside mxGraphModel".into())
+                    })?;
+                    let cell = parse_mxcell(&reader, &e)?;
+                    gm.root.cells.push(cell);
+                    // empty cell can't have children like mxGeometry, so don't set current_cell_idx
+                }
+                "mxGeometry" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                    })?;
+                    let geom = parse_mxgeometry(&reader, &e)?;
+                    let idx = current_cell_idx.ok_or_else(|| {
+                        ParseError::Structure("mxGeometry found but no current mxCell".into())
+                    })?;
+                    gm.root.cells[idx].geometry = Some(geom);
+                }
+                _ => {}
+            },
+
+            Event::Text(t) => {
+                // Allowed "trimming": ignore indentation-only text nodes
+                let txt = t.decode()?.into_owned();
+                if txt.trim().is_empty() {
+                    // formatting-only
+                } else if let Some(d) = current_diagram.as_mut() {
+                    // Preserve EXACT content (no trimming) if this diagram isn't parsed as mxGraphModel.
+                    // This is where encoded payload lives in most .drawio files.
+                    if d.graph_model.is_none() {
+                        match d.encoded_payload.as_mut() {
+                            Some(existing) => existing.push_str(&txt),
+                            None => d.encoded_payload = Some(txt),
+                        }
+                    }
+                }
+            }
+
+            Event::CData(c) => {
+                // Same policy as Text
+                let txt = c.decode()?.into_owned();
+                if txt.trim().is_empty() {
+                    // formatting-only
+                } else if let Some(d) = current_diagram.as_mut()
+                    && d.graph_model.is_none()
+                {
+                    match d.encoded_payload.as_mut() {
+                        Some(existing) => existing.push_str(&txt),
+                        None => d.encoded_payload = Some(txt),
+                    }
+                }
+            }
+
+            Event::End(e) => match local_name_end(&e)?.as_str() {
+                "mxGraphModel" => {
+                    let gm = current_graph.take().ok_or_else(|| {
+                        ParseError::Structure("closing mxGraphModel but none open".into())
+                    })?;
+                    let d = current_diagram.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxGraphModel outside diagram".into())
+                    })?;
+                    d.graph_model = Some(gm);
+                }
+                "diagram" => {
+                    let d = current_diagram.take().ok_or_else(|| {
+                        ParseError::Structure("closing diagram but none open".into())
+                    })?;
+                    let file = mxfile
+                        .as_mut()
+                        .ok_or_else(|| ParseError::Structure("diagram outside mxfile".into()))?;
+                    file.diagrams.push(d);
+                }
+                "mxCell" => {
+                    current_cell_idx = None;
+                }
+                _ => {}
+            },
+
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    mxfile.ok_or_else(|| ParseError::Structure("no <mxfile> root element found".into()))
+}
+
+fn parse_mxcell<R: BufRead>(_reader: &Reader<R>, e: &BytesStart<'_>) -> ParseResult<MxCell> {
+    let attrs = attrs_to_map(e)?;
+    let id = attrs
+        .get("id")
+        .cloned()
+        .ok_or(ParseError::MissingAttr("mxCell@id"))?;
+
+    let mut extra = BTreeMap::new();
+    for (k, v) in &attrs {
+        if !is_known_cell_attr(k) {
+            extra.insert(k.clone(), v.clone());
+        }
+    }
+
+    Ok(MxCell {
+        id,
+        parent: attrs.get("parent").cloned(),
+        source: attrs.get("source").cloned(),
+        target: attrs.get("target").cloned(),
+        value: attrs.get("value").cloned(),
+        style: attrs.get("style").cloned(),
+        vertex: parse_bool_opt(attrs.get("vertex")),
+        edge: parse_bool_opt(attrs.get("edge")),
+        extra,
+        geometry: None,
+    })
+}
+
+fn parse_mxgeometry<R: BufRead>(
+    _reader: &Reader<R>,
+    e: &BytesStart<'_>,
+) -> ParseResult<MxGeometry> {
+    let attrs = attrs_to_map(e)?;
+
+    let mut extra = BTreeMap::new();
+    for (k, v) in &attrs {
+        if !is_known_geometry_attr(k) {
+            extra.insert(k.clone(), v.clone());
+        }
+    }
+
+    Ok(MxGeometry {
+        x: parse_f64_opt(attrs.get("x"), "x")?,
+        y: parse_f64_opt(attrs.get("y"), "y")?,
+        width: parse_f64_opt(attrs.get("width"), "width")?,
+        height: parse_f64_opt(attrs.get("height"), "height")?,
+        relative: parse_bool_opt(attrs.get("relative")),
+        as_attr: attrs.get("as").cloned(),
+        extra,
+    })
+}
+
+fn attrs_to_map(e: &BytesStart<'_>) -> ParseResult<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for a in e.attributes() {
+        let a = a?; // AttrError -> ParseError via #[from]
+        let key = str::from_utf8(a.key.as_ref())?.to_string();
+        let val = a.unescape_value()?.to_string();
+        out.insert(key, val);
+    }
+    Ok(out)
+}
+
+fn local_name_start(e: &BytesStart<'_>) -> ParseResult<String> {
+    Ok(str::from_utf8(e.name().as_ref())?.to_string())
+}
+
+fn local_name_end(e: &BytesEnd<'_>) -> ParseResult<String> {
+    Ok(str::from_utf8(e.name().as_ref())?.to_string())
+}
+
+fn parse_bool_opt(v: Option<&String>) -> Option<bool> {
+    let s = v?;
+    match s.as_str() {
+        "1" | "true" | "TRUE" | "True" => Some(true),
+        "0" | "false" | "FALSE" | "False" => Some(false),
+        _ => None,
+    }
+}
+
+fn parse_i64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<i64>> {
+    let Some(s) = v else { return Ok(None) };
+    let parsed = s.parse::<i64>().map_err(|_| ParseError::InvalidNumber {
+        field,
+        value: s.clone(),
+    })?;
+    Ok(Some(parsed))
+}
+
+fn parse_f64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<f64>> {
+    let Some(s) = v else { return Ok(None) };
+    let parsed = s.parse::<f64>().map_err(|_| ParseError::InvalidNumber {
+        field,
+        value: s.clone(),
+    })?;
+    Ok(Some(parsed))
+}
+
+fn is_known_graphmodel_attr(k: &str) -> bool {
+    matches!(
+        k,
+        "dx" | "dy"
+            | "grid"
+            | "gridSize"
+            | "guides"
+            | "tooltips"
+            | "connect"
+            | "arrows"
+            | "fold"
+            | "page"
+            | "pageScale"
+            | "pageWidth"
+            | "pageHeight"
+            | "math"
+            | "shadow"
+    )
+}
+
+fn is_known_cell_attr(k: &str) -> bool {
+    matches!(
+        k,
+        "id" | "parent" | "source" | "target" | "value" | "style" | "vertex" | "edge"
+    )
+}
+
+fn is_known_geometry_attr(k: &str) -> bool {
+    matches!(k, "x" | "y" | "width" | "height" | "relative" | "as")
+}
