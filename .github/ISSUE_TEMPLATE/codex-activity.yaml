@@ -1,0 +1,25 @@
+name: Codex Activity
+description: A task intended to be implemented by Codex
+title: "[activity] "
+body:
+  - type: textarea
+    attributes:
+      label: Goal
+      description: What should be achieved?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Acceptance criteria
+      description: How do we know this is done?
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Constraints
+      description: Things Codex must not do
+      placeholder: |
+        - Do not update fixtures
+        - No new dependencies
