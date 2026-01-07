@@ -1,0 +1,3 @@
+# Relative to fixtures/corpus
+handpicked/004-shape-test.drawio
+handpicked/005-arrow-text.drawio
