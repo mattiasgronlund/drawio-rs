@@ -1,8 +1,10 @@
 use std::{
     env, fs,
+    path::Component,
     path::{Path, PathBuf},
 };
 
+use std::collections::HashSet;
 use serde_json::Value;
 use similar::TextDiff;
 use walkdir::WalkDir;
@@ -78,6 +80,10 @@ fn fixtures_root() -> PathBuf {
         .join("fixtures")
 }
 
+fn fixtures_ignore_path() -> PathBuf {
+    fixtures_root().join("ignore.txt")
+}
+
 fn corpus_dir() -> PathBuf {
     fixtures_root().join("corpus")
 }
@@ -93,6 +99,31 @@ fn expected_path_for_drawio(drawio_path: &Path) -> PathBuf {
         .expect("drawio file must be under fixtures/corpus");
 
     expected_dir().join(rel).with_extension("json") // replaces .drawio/.xml with .json
+}
+
+fn rel_fixture_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|c| match c {
+            Component::Normal(p) => Some(p.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn ignored_fixtures() -> HashSet<String> {
+    let ignore_path = fixtures_ignore_path();
+    if !ignore_path.exists() {
+        return HashSet::new();
+    }
+
+    let contents = read_to_string(&ignore_path);
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect()
 }
 
 fn is_update_enabled() -> bool {
@@ -131,6 +162,7 @@ fn parser_dump_matches_expected_json() {
     );
 
     let update = is_update_enabled();
+    let ignore = ignored_fixtures();
     let mut failures: Vec<String> = Vec::new();
 
     // Walk all files and pick .drawio / .dio / .drawio.xml etc if you want.
@@ -148,6 +180,14 @@ fn parser_dump_matches_expected_json() {
             .unwrap_or(false);
 
         if !is_drawio {
+            continue;
+        }
+
+        let rel = path
+            .strip_prefix(corpus_dir())
+            .expect("drawio file must be under fixtures/corpus");
+        let rel_path = rel_fixture_path(rel);
+        if ignore.contains(&rel_path) {
             continue;
         }
 
