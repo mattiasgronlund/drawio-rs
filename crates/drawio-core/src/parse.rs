@@ -3,7 +3,8 @@
 // quick-xml 0.38.4 compatible parser for "direct XML" .drawio files.
 // - Parses <mxfile> with one or more <diagram>
 // - Supports <diagram> containing <mxGraphModel> directly
-// - Captures non-whitespace <diagram> text as encoded_payload (does NOT decode yet)
+// - Captures non-whitespace <diagram> text as encoded_payload
+// - Attempts to decode encoded diagram payloads into mxGraphModel
 // - Preserves unknown attributes into `extra` maps
 //
 // Trimming policy for .drawio:
@@ -12,10 +13,14 @@
 // - DO preserve non-whitespace text exactly where it is meaningful (encoded <diagram> payload)
 
 use crate::model::*;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use flate2::read::DeflateDecoder;
+use percent_encoding::percent_decode_str;
 use quick_xml::Reader;
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use std::collections::BTreeMap;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::str;
 
 #[derive(Debug, thiserror::Error)]
@@ -40,6 +45,12 @@ pub enum ParseError {
 
     #[error("encoding error: {0}")]
     Encoding(#[from] quick_xml::encoding::EncodingError),
+
+    #[error("base64 decode error: {0}")]
+    Base64(#[from] base64::DecodeError),
+
+    #[error("deflate decode error: {0}")]
+    Deflate(#[from] std::io::Error),
 }
 
 pub type ParseResult<T> = Result<T, ParseError>;
@@ -48,8 +59,8 @@ pub type ParseResult<T> = Result<T, ParseError>;
 /// `<mxfile>...<diagram>...<mxGraphModel>...</mxGraphModel>...</diagram></mxfile>`.
 ///
 /// Many real `.drawio` files store the `<diagram>` body as an encoded string.
-/// This parser captures such payloads as `Diagram.encoded_payload` if present,
-/// but does not decode it yet.
+/// This parser captures such payloads as `Diagram.encoded_payload` if present
+/// and attempts to decode them into `Diagram.graph_model`.
 pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
     let mut reader = Reader::from_str(xml);
     // IMPORTANT: do not enable global trim_text. We'll ignore whitespace-only text manually.
@@ -218,6 +229,7 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                     let d = current_diagram.take().ok_or_else(|| {
                         ParseError::Structure("closing diagram but none open".into())
                     })?;
+                    let d = decode_diagram_if_needed(d)?;
                     let file = mxfile
                         .as_mut()
                         .ok_or_else(|| ParseError::Structure("diagram outside mxfile".into()))?;
@@ -237,6 +249,137 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
     }
 
     mxfile.ok_or_else(|| ParseError::Structure("no <mxfile> root element found".into()))
+}
+
+fn decode_diagram_if_needed(mut diagram: Diagram) -> ParseResult<Diagram> {
+    if diagram.graph_model.is_none()
+        && let Some(payload) = diagram.encoded_payload.as_deref()
+    {
+        let decoded = decode_diagram_payload(payload)?;
+        diagram.graph_model = Some(parse_graph_model(&decoded)?);
+    }
+    Ok(diagram)
+}
+
+fn decode_diagram_payload(payload: &str) -> ParseResult<String> {
+    let compact: String = payload.chars().filter(|c| !c.is_whitespace()).collect();
+    let decoded = STANDARD.decode(compact)?;
+    let mut decoder = DeflateDecoder::new(&decoded[..]);
+    let mut inflated = Vec::new();
+    decoder.read_to_end(&mut inflated)?;
+    let inflated_str = std::str::from_utf8(&inflated)?;
+    let decoded = percent_decode_str(inflated_str).decode_utf8()?;
+    Ok(decoded.into_owned())
+}
+
+fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
+    let mut reader = Reader::from_str(xml);
+    let mut buf = Vec::new();
+    let mut current_graph: Option<MxGraphModel> = None;
+    let mut current_cell_idx: Option<usize> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Start(e) => match local_name_start(&e)?.as_str() {
+                "mxGraphModel" => {
+                    if current_graph.is_some() {
+                        return Err(ParseError::Structure(
+                            "multiple mxGraphModel roots found".into(),
+                        ));
+                    }
+                    let attrs = attrs_to_map(&e)?;
+
+                    let mut gm = MxGraphModel {
+                        dx: parse_i64_opt(attrs.get("dx"), "dx")?,
+                        dy: parse_i64_opt(attrs.get("dy"), "dy")?,
+                        grid: parse_bool_opt(attrs.get("grid")),
+                        grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
+                        guides: parse_bool_opt(attrs.get("guides")),
+                        tooltips: parse_bool_opt(attrs.get("tooltips")),
+                        connect: parse_bool_opt(attrs.get("connect")),
+                        arrows: parse_bool_opt(attrs.get("arrows")),
+                        fold: parse_bool_opt(attrs.get("fold")),
+                        page: parse_bool_opt(attrs.get("page")),
+                        page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
+                        page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
+                        page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
+                        math: parse_bool_opt(attrs.get("math")),
+                        shadow: parse_bool_opt(attrs.get("shadow")),
+                        extra: BTreeMap::new(),
+                        root: Root { cells: Vec::new() },
+                    };
+
+                    for (k, v) in attrs {
+                        if !is_known_graphmodel_attr(&k) {
+                            gm.extra.insert(k, v);
+                        }
+                    }
+
+                    current_graph = Some(gm);
+                }
+                "mxCell" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxCell outside mxGraphModel".into())
+                    })?;
+                    let cell = parse_mxcell(&reader, &e)?;
+                    gm.root.cells.push(cell);
+                    current_cell_idx = Some(gm.root.cells.len() - 1);
+                }
+                "mxGeometry" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                    })?;
+                    let geom = parse_mxgeometry(&reader, &e)?;
+                    let idx = current_cell_idx.ok_or_else(|| {
+                        ParseError::Structure("mxGeometry found but no current mxCell".into())
+                    })?;
+                    gm.root.cells[idx].geometry = Some(geom);
+                }
+                _ => {}
+            },
+
+            Event::Empty(e) => match local_name_start(&e)?.as_str() {
+                "mxCell" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxCell outside mxGraphModel".into())
+                    })?;
+                    let cell = parse_mxcell(&reader, &e)?;
+                    gm.root.cells.push(cell);
+                }
+                "mxGeometry" => {
+                    let gm = current_graph.as_mut().ok_or_else(|| {
+                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                    })?;
+                    let geom = parse_mxgeometry(&reader, &e)?;
+                    let idx = current_cell_idx.ok_or_else(|| {
+                        ParseError::Structure("mxGeometry found but no current mxCell".into())
+                    })?;
+                    gm.root.cells[idx].geometry = Some(geom);
+                }
+                _ => {}
+            },
+
+            Event::End(e) => match local_name_end(&e)?.as_str() {
+                "mxGraphModel" => {
+                    return current_graph.take().ok_or_else(|| {
+                        ParseError::Structure("closing mxGraphModel but none open".into())
+                    });
+                }
+                "mxCell" => {
+                    current_cell_idx = None;
+                }
+                _ => {}
+            },
+
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Err(ParseError::Structure(
+        "no <mxGraphModel> root element found".into(),
+    ))
 }
 
 fn parse_mxcell<R: BufRead>(_reader: &Reader<R>, e: &BytesStart<'_>) -> ParseResult<MxCell> {

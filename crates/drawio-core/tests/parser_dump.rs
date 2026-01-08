@@ -4,9 +4,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use std::collections::HashSet;
 use serde_json::Value;
 use similar::TextDiff;
+use std::collections::HashSet;
 use walkdir::WalkDir;
 
 fn parse_drawio_to_json(drawio_xml: &str) -> serde_json::Value {
