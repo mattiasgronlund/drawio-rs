@@ -89,7 +89,6 @@ fn strip_content_attribute(svg: &str) -> String {
     svg.to_string()
 }
 
-#[ignore]
 #[test]
 fn svg_dump_matches_expected_svg() {
     let corpus = corpus_dir();
