@@ -464,6 +464,9 @@ fn parse_bool_opt(v: Option<&String>) -> Option<bool> {
 
 fn parse_i64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<i64>> {
     let Some(s) = v else { return Ok(None) };
+    if s.trim().is_empty() {
+        return Ok(None);
+    }
     let parsed = s.parse::<i64>().map_err(|_| ParseError::InvalidNumber {
         field,
         value: s.clone(),
@@ -473,6 +476,9 @@ fn parse_i64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<
 
 fn parse_f64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<f64>> {
     let Some(s) = v else { return Ok(None) };
+    if s.trim().is_empty() {
+        return Ok(None);
+    }
     let parsed = s.parse::<f64>().map_err(|_| ParseError::InvalidNumber {
         field,
         value: s.clone(),

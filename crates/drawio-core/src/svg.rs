@@ -284,12 +284,7 @@ fn render_vertex_label(
     let center_y = y + height / 2.0;
     let margin_left = x + 1.0;
     let padding_top = center_y;
-    let image_height = text_image_height(font_size);
-    let image_width = label_width;
-    let image_x = center_x - image_width / 2.0;
-    let image_y = center_y - (font_size / 2.0 + 0.5);
     let text = escape_html(value);
-    let image_href = fallback_image_href(value, font_size, image_width, image_height);
 
     let mut out = String::new();
     write!(
@@ -301,18 +296,6 @@ fn render_vertex_label(
         text
     )
     .unwrap();
-    if let Some(href) = image_href {
-        write!(
-            out,
-            "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" xlink:href=\"{}\"/>",
-            fmt_num(image_x),
-            fmt_num(image_y),
-            fmt_num(image_width),
-            fmt_num(image_height),
-            href
-        )
-        .unwrap();
-    }
     out.push_str("</switch></g></g>");
     Some(out)
 }
@@ -327,12 +310,7 @@ fn render_edge_label(edge: &MxCell, source_right: f64, target_left: f64, y: f64)
     let center_y = y;
     let margin_left = center_x;
     let padding_top = center_y;
-    let image_width = estimate_text_width(value, font_size);
-    let image_height = text_image_height(font_size);
-    let image_x = center_x - image_width / 2.0;
-    let image_y = center_y - (font_size / 2.0 + 0.5);
     let text = escape_html(value);
-    let image_href = fallback_image_href(value, font_size, image_width, image_height);
 
     let mut out = String::new();
     write!(
@@ -343,36 +321,8 @@ fn render_edge_label(edge: &MxCell, source_right: f64, target_left: f64, y: f64)
         text
     )
     .unwrap();
-    if let Some(href) = image_href {
-        write!(
-            out,
-            "<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" xlink:href=\"{}\"/>",
-            fmt_num(image_x),
-            fmt_num(image_y),
-            fmt_num(image_width),
-            fmt_num(image_height),
-            href
-        )
-        .unwrap();
-    }
     out.push_str("</switch></g></g>");
     Some(out)
-}
-
-fn text_image_height(font_size: f64) -> f64 {
-    font_size * 1.25 + 2.0
-}
-
-fn estimate_text_width(text: &str, font_size: f64) -> f64 {
-    let mut units = 0.0;
-    for ch in text.chars() {
-        units += match ch {
-            'A'..='Z' => 0.65,
-            ' ' => 0.3,
-            _ => 0.55,
-        };
-    }
-    (units * font_size).round()
 }
 
 fn escape_html(input: &str) -> String {
@@ -388,17 +338,4 @@ fn escape_html(input: &str) -> String {
         }
     }
     out
-}
-
-fn fallback_image_href(text: &str, font_size: f64, width: f64, height: f64) -> Option<String> {
-    let data = match text {
-        "Some text" if font_size == 12.0 && width == 118.0 && height == 17.0 => {
-            include_str!("../assets/text_some_text.png.b64")
-        }
-        "Text on the arrow" if font_size == 11.0 && width == 96.0 && height == 15.75 => {
-            include_str!("../assets/text_on_the_arrow.png.b64")
-        }
-        _ => return None,
-    };
-    Some(format!("data:image/png;base64,{}", data.trim()))
 }
