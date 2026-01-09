@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+
+export UID
+export GID
+GID=$(id -g)
+
+docker compose -f ".devcontainer/docker-compose.yml" run --rm -i -w "$PWD" drawio-cli "$@"

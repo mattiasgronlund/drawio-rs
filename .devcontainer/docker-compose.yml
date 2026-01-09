@@ -1,0 +1,20 @@
+services:
+  workspace:
+    user: "vscode"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ../..:/workspaces:cached
+
+  drawio-cli:
+    profiles: [ "tools" ]
+    build:
+      context: .
+      dockerfile: Dockerfile.drawio-cli
+    user: "${UID}:${GID}"
+    working_dir: /workspaces
+    volumes:
+      - /workspaces:/workspaces
+      - /home/vscode:/home/vscode
+      - /etc/passwd:/etc/passwd:ro

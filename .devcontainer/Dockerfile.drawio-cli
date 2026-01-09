@@ -1,0 +1,56 @@
+# spell-checker: ignore asciidoctor findutils kroki trixie noninteractive libasound libgbm1
+FROM node:24-trixie
+
+ENV NODE_PATH /usr/local/share/.config/yarn/global/node_modules
+
+WORKDIR "/opt/drawio-desktop"
+RUN <<EOF
+    set -ex
+
+    apt-get update && export DEBIAN_FRONTEND=noninteractive
+    apt-get -y install --no-install-recommends jq bash ripgrep xvfb wget libgbm1 libasound2
+
+    TARGETARCH=$(arch |sed 's/x86_64/amd64/')
+
+    # Drawio Desktop
+    DRAWIO_VERSION="29.0.3"
+    pwd
+    wget -q https://github.com/jgraph/drawio-desktop/releases/download/v${DRAWIO_VERSION}/drawio-${TARGETARCH}-${DRAWIO_VERSION}.deb
+    apt-get install -y /opt/drawio-desktop/drawio-${TARGETARCH}-${DRAWIO_VERSION}.deb
+    rm -rf /opt/drawio-desktop/drawio-${TARGETARCH}-${DRAWIO_VERSION}.deb
+    # Cleanup layer
+    apt-get remove -y wget curl
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+EOF
+
+
+
+ENV ELECTRON_DISABLE_SECURITY_WARNINGS="true"
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV ELECTRON_DISABLE_GPU=1
+ENV DRAWIO_DISABLE_UPDATE="true"
+ENV DRAWIO_DESKTOP_COMMAND_TIMEOUT="10s"
+ENV DRAWIO_DESKTOP_EXECUTABLE_PATH="/opt/drawio/drawio"
+ENV DRAWIO_DESKTOP_SOURCE_FOLDER="/opt/drawio-desktop"
+ENV DRAWIO_DESKTOP_RUNNER_COMMAND_LINE="/opt/drawio-desktop/runner.sh"
+ENV XVFB_DISPLAY=":42"
+ENV XVFB_OPTIONS="-nolisten unix"
+ENV ELECTRON_ENABLE_LOGGING="false"
+ENV SCRIPT_DEBUG_MODE="false"
+
+WORKDIR /
+
+RUN <<EOF
+    set -ex
+
+    apt-get update && export DEBIAN_FRONTEND=noninteractive
+    apt-get -y install --no-install-recommends strace
+EOF
+
+RUN apt-get -y install --no-install-recommends less
+COPY drawio_docker_entrypoint.sh /usr/local/bin/docker_entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker_entrypoint.sh"]
+
+CMD ["drawio-cli"]

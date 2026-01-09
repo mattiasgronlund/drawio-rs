@@ -1,19 +1,19 @@
 {
   "name": "drawio-rs devcontainer",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "context": "."
-  },
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "workspace",
   "customizations": {
     "vscode": {
       "chat.disableAIFeatures": true,
       "extensions": [
+        //"${containerWorkspaceFolder}/.vscode/drawio-1.9.0-6.vsix",
+        //"${containerWorkspaceFolder}/.vscode/vscode-text-util-0.0.1.vsix",
+        "ms-azuretools.vscode-containers",
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
         "github.vscode-github-actions",
         "openai.chatgpt",
-        // "${containerWorkspaceFolder}/.vscode/drawio-1.9.0-6.vsix",
-        // "${containerWorkspaceFolder}/.vscode/vscode-text-util-0.0.1.vsix",
+        "ryanluker.vscode-coverage-gutters"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -24,6 +24,10 @@
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "upgradePackages": true
+    },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": false,
+      "disableIp6tables": true
     }
   },
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
