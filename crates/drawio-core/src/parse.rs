@@ -72,118 +72,141 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
     let mut current_graph: Option<MxGraphModel> = None;
 
     let mut current_cell_idx: Option<usize> = None;
+    let mut user_object_depth: usize = 0;
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) => match local_name_start(&e)?.as_str() {
-                "mxfile" => {
-                    let attrs = attrs_to_map(&e)?;
-                    mxfile = Some(MxFile {
-                        host: attrs.get("host").cloned(),
-                        version: attrs.get("version").cloned(),
-                        file_type: attrs.get("type").cloned(),
-                        diagrams: Vec::new(),
-                    });
+            Event::Start(e) => {
+                let name = local_name_start(&e)?;
+                if is_user_object(&name) {
+                    user_object_depth = user_object_depth.saturating_add(1);
+                    continue;
                 }
-                "diagram" => {
-                    let attrs = attrs_to_map(&e)?;
-                    current_diagram = Some(Diagram {
-                        id: attrs.get("id").cloned(),
-                        name: attrs.get("name").cloned(),
-                        encoded_payload: None,
-                        graph_model: None,
-                    });
+                if user_object_depth > 0 {
+                    continue;
                 }
-                "mxGraphModel" => {
-                    let attrs = attrs_to_map(&e)?;
+                match name.as_str() {
+                    "mxfile" => {
+                        let attrs = attrs_to_map(&e)?;
+                        mxfile = Some(MxFile {
+                            host: attrs.get("host").cloned(),
+                            version: attrs.get("version").cloned(),
+                            file_type: attrs.get("type").cloned(),
+                            diagrams: Vec::new(),
+                        });
+                    }
+                    "diagram" => {
+                        let attrs = attrs_to_map(&e)?;
+                        current_diagram = Some(Diagram {
+                            id: attrs.get("id").cloned(),
+                            name: attrs.get("name").cloned(),
+                            encoded_payload: None,
+                            graph_model: None,
+                        });
+                    }
+                    "mxGraphModel" => {
+                        let attrs = attrs_to_map(&e)?;
 
-                    let mut gm = MxGraphModel {
-                        dx: parse_i64_opt(attrs.get("dx"), "dx")?,
-                        dy: parse_i64_opt(attrs.get("dy"), "dy")?,
-                        grid: parse_bool_opt(attrs.get("grid")),
-                        grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
-                        guides: parse_bool_opt(attrs.get("guides")),
-                        tooltips: parse_bool_opt(attrs.get("tooltips")),
-                        connect: parse_bool_opt(attrs.get("connect")),
-                        arrows: parse_bool_opt(attrs.get("arrows")),
-                        fold: parse_bool_opt(attrs.get("fold")),
-                        page: parse_bool_opt(attrs.get("page")),
-                        page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
-                        page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
-                        page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
-                        math: parse_bool_opt(attrs.get("math")),
-                        shadow: parse_bool_opt(attrs.get("shadow")),
-                        extra: BTreeMap::new(),
-                        root: Root { cells: Vec::new() },
-                    };
+                        let mut gm = MxGraphModel {
+                            dx: parse_i64_opt(attrs.get("dx"), "dx")?,
+                            dy: parse_i64_opt(attrs.get("dy"), "dy")?,
+                            grid: parse_bool_opt(attrs.get("grid")),
+                            grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
+                            guides: parse_bool_opt(attrs.get("guides")),
+                            tooltips: parse_bool_opt(attrs.get("tooltips")),
+                            connect: parse_bool_opt(attrs.get("connect")),
+                            arrows: parse_bool_opt(attrs.get("arrows")),
+                            fold: parse_bool_opt(attrs.get("fold")),
+                            page: parse_bool_opt(attrs.get("page")),
+                            page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
+                            page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
+                            page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
+                            math: parse_bool_opt(attrs.get("math")),
+                            shadow: parse_bool_opt(attrs.get("shadow")),
+                            extra: BTreeMap::new(),
+                            root: Root { cells: Vec::new() },
+                        };
 
-                    // Preserve unknown attributes in extra
-                    for (k, v) in attrs {
-                        if !is_known_graphmodel_attr(&k) {
-                            gm.extra.insert(k, v);
+                        // Preserve unknown attributes in extra
+                        for (k, v) in attrs {
+                            if !is_known_graphmodel_attr(&k) {
+                                gm.extra.insert(k, v);
+                            }
+                        }
+
+                        current_graph = Some(gm);
+                    }
+                    "mxCell" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxCell outside mxGraphModel".into())
+                        })?;
+                        let cell = parse_mxcell(&reader, &e)?;
+                        gm.root.cells.push(cell);
+                        current_cell_idx = Some(gm.root.cells.len() - 1);
+                    }
+                    "mxGeometry" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                        })?;
+                        let geom = parse_mxgeometry(&reader, &e)?;
+                        let idx = current_cell_idx.ok_or_else(|| {
+                            ParseError::Structure("mxGeometry found but no current mxCell".into())
+                        })?;
+                        gm.root.cells[idx].geometry = Some(geom);
+                    }
+                    _ => {}
+                }
+            }
+
+            Event::Empty(e) => {
+                let name = local_name_start(&e)?;
+                if is_user_object(&name) {
+                    continue;
+                }
+                if user_object_depth > 0 {
+                    continue;
+                }
+                match name.as_str() {
+                    "diagram" => {
+                        let attrs = attrs_to_map(&e)?;
+                        let d = Diagram {
+                            id: attrs.get("id").cloned(),
+                            name: attrs.get("name").cloned(),
+                            encoded_payload: None,
+                            graph_model: None,
+                        };
+                        if let Some(file) = mxfile.as_mut() {
+                            file.diagrams.push(d);
+                        } else {
+                            return Err(ParseError::Structure("diagram outside mxfile".into()));
                         }
                     }
-
-                    current_graph = Some(gm);
-                }
-                "mxCell" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxCell outside mxGraphModel".into())
-                    })?;
-                    let cell = parse_mxcell(&reader, &e)?;
-                    gm.root.cells.push(cell);
-                    current_cell_idx = Some(gm.root.cells.len() - 1);
-                }
-                "mxGeometry" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
-                    })?;
-                    let geom = parse_mxgeometry(&reader, &e)?;
-                    let idx = current_cell_idx.ok_or_else(|| {
-                        ParseError::Structure("mxGeometry found but no current mxCell".into())
-                    })?;
-                    gm.root.cells[idx].geometry = Some(geom);
-                }
-                _ => {}
-            },
-
-            Event::Empty(e) => match local_name_start(&e)?.as_str() {
-                "diagram" => {
-                    let attrs = attrs_to_map(&e)?;
-                    let d = Diagram {
-                        id: attrs.get("id").cloned(),
-                        name: attrs.get("name").cloned(),
-                        encoded_payload: None,
-                        graph_model: None,
-                    };
-                    if let Some(file) = mxfile.as_mut() {
-                        file.diagrams.push(d);
-                    } else {
-                        return Err(ParseError::Structure("diagram outside mxfile".into()));
+                    "mxCell" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxCell outside mxGraphModel".into())
+                        })?;
+                        let cell = parse_mxcell(&reader, &e)?;
+                        gm.root.cells.push(cell);
+                        // empty cell can't have children like mxGeometry, so don't set current_cell_idx
                     }
+                    "mxGeometry" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                        })?;
+                        let geom = parse_mxgeometry(&reader, &e)?;
+                        let idx = current_cell_idx.ok_or_else(|| {
+                            ParseError::Structure("mxGeometry found but no current mxCell".into())
+                        })?;
+                        gm.root.cells[idx].geometry = Some(geom);
+                    }
+                    _ => {}
                 }
-                "mxCell" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxCell outside mxGraphModel".into())
-                    })?;
-                    let cell = parse_mxcell(&reader, &e)?;
-                    gm.root.cells.push(cell);
-                    // empty cell can't have children like mxGeometry, so don't set current_cell_idx
-                }
-                "mxGeometry" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
-                    })?;
-                    let geom = parse_mxgeometry(&reader, &e)?;
-                    let idx = current_cell_idx.ok_or_else(|| {
-                        ParseError::Structure("mxGeometry found but no current mxCell".into())
-                    })?;
-                    gm.root.cells[idx].geometry = Some(geom);
-                }
-                _ => {}
-            },
+            }
 
             Event::Text(t) => {
+                if user_object_depth > 0 {
+                    continue;
+                }
                 // Allowed "trimming": ignore indentation-only text nodes
                 let txt = t.decode()?.into_owned();
                 if txt.trim().is_empty() {
@@ -201,6 +224,9 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
             }
 
             Event::CData(c) => {
+                if user_object_depth > 0 {
+                    continue;
+                }
                 // Same policy as Text
                 let txt = c.decode()?.into_owned();
                 if txt.trim().is_empty() {
@@ -215,31 +241,41 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                 }
             }
 
-            Event::End(e) => match local_name_end(&e)?.as_str() {
-                "mxGraphModel" => {
-                    let gm = current_graph.take().ok_or_else(|| {
-                        ParseError::Structure("closing mxGraphModel but none open".into())
-                    })?;
-                    let d = current_diagram.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxGraphModel outside diagram".into())
-                    })?;
-                    d.graph_model = Some(gm);
+            Event::End(e) => {
+                let name = local_name_end(&e)?;
+                if is_user_object(&name) {
+                    user_object_depth = user_object_depth.saturating_sub(1);
+                    continue;
                 }
-                "diagram" => {
-                    let d = current_diagram.take().ok_or_else(|| {
-                        ParseError::Structure("closing diagram but none open".into())
-                    })?;
-                    let d = decode_diagram_if_needed(d)?;
-                    let file = mxfile
-                        .as_mut()
-                        .ok_or_else(|| ParseError::Structure("diagram outside mxfile".into()))?;
-                    file.diagrams.push(d);
+                if user_object_depth > 0 {
+                    continue;
                 }
-                "mxCell" => {
-                    current_cell_idx = None;
+                match name.as_str() {
+                    "mxGraphModel" => {
+                        let gm = current_graph.take().ok_or_else(|| {
+                            ParseError::Structure("closing mxGraphModel but none open".into())
+                        })?;
+                        let d = current_diagram.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxGraphModel outside diagram".into())
+                        })?;
+                        d.graph_model = Some(gm);
+                    }
+                    "diagram" => {
+                        let d = current_diagram.take().ok_or_else(|| {
+                            ParseError::Structure("closing diagram but none open".into())
+                        })?;
+                        let d = decode_diagram_if_needed(d)?;
+                        let file = mxfile.as_mut().ok_or_else(|| {
+                            ParseError::Structure("diagram outside mxfile".into())
+                        })?;
+                        file.diagrams.push(d);
+                    }
+                    "mxCell" => {
+                        current_cell_idx = None;
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
 
             Event::Eof => break,
             _ => {}
@@ -277,99 +313,129 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
     let mut buf = Vec::new();
     let mut current_graph: Option<MxGraphModel> = None;
     let mut current_cell_idx: Option<usize> = None;
+    let mut user_object_depth: usize = 0;
 
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) => match local_name_start(&e)?.as_str() {
-                "mxGraphModel" => {
-                    if current_graph.is_some() {
-                        return Err(ParseError::Structure(
-                            "multiple mxGraphModel roots found".into(),
-                        ));
-                    }
-                    let attrs = attrs_to_map(&e)?;
-
-                    let mut gm = MxGraphModel {
-                        dx: parse_i64_opt(attrs.get("dx"), "dx")?,
-                        dy: parse_i64_opt(attrs.get("dy"), "dy")?,
-                        grid: parse_bool_opt(attrs.get("grid")),
-                        grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
-                        guides: parse_bool_opt(attrs.get("guides")),
-                        tooltips: parse_bool_opt(attrs.get("tooltips")),
-                        connect: parse_bool_opt(attrs.get("connect")),
-                        arrows: parse_bool_opt(attrs.get("arrows")),
-                        fold: parse_bool_opt(attrs.get("fold")),
-                        page: parse_bool_opt(attrs.get("page")),
-                        page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
-                        page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
-                        page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
-                        math: parse_bool_opt(attrs.get("math")),
-                        shadow: parse_bool_opt(attrs.get("shadow")),
-                        extra: BTreeMap::new(),
-                        root: Root { cells: Vec::new() },
-                    };
-
-                    for (k, v) in attrs {
-                        if !is_known_graphmodel_attr(&k) {
-                            gm.extra.insert(k, v);
+            Event::Start(e) => {
+                let name = local_name_start(&e)?;
+                if is_user_object(&name) {
+                    user_object_depth = user_object_depth.saturating_add(1);
+                    continue;
+                }
+                if user_object_depth > 0 {
+                    continue;
+                }
+                match name.as_str() {
+                    "mxGraphModel" => {
+                        if current_graph.is_some() {
+                            return Err(ParseError::Structure(
+                                "multiple mxGraphModel roots found".into(),
+                            ));
                         }
+                        let attrs = attrs_to_map(&e)?;
+
+                        let mut gm = MxGraphModel {
+                            dx: parse_i64_opt(attrs.get("dx"), "dx")?,
+                            dy: parse_i64_opt(attrs.get("dy"), "dy")?,
+                            grid: parse_bool_opt(attrs.get("grid")),
+                            grid_size: parse_i64_opt(attrs.get("gridSize"), "gridSize")?,
+                            guides: parse_bool_opt(attrs.get("guides")),
+                            tooltips: parse_bool_opt(attrs.get("tooltips")),
+                            connect: parse_bool_opt(attrs.get("connect")),
+                            arrows: parse_bool_opt(attrs.get("arrows")),
+                            fold: parse_bool_opt(attrs.get("fold")),
+                            page: parse_bool_opt(attrs.get("page")),
+                            page_scale: parse_f64_opt(attrs.get("pageScale"), "pageScale")?,
+                            page_width: parse_f64_opt(attrs.get("pageWidth"), "pageWidth")?,
+                            page_height: parse_f64_opt(attrs.get("pageHeight"), "pageHeight")?,
+                            math: parse_bool_opt(attrs.get("math")),
+                            shadow: parse_bool_opt(attrs.get("shadow")),
+                            extra: BTreeMap::new(),
+                            root: Root { cells: Vec::new() },
+                        };
+
+                        for (k, v) in attrs {
+                            if !is_known_graphmodel_attr(&k) {
+                                gm.extra.insert(k, v);
+                            }
+                        }
+
+                        current_graph = Some(gm);
                     }
+                    "mxCell" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxCell outside mxGraphModel".into())
+                        })?;
+                        let cell = parse_mxcell(&reader, &e)?;
+                        gm.root.cells.push(cell);
+                        current_cell_idx = Some(gm.root.cells.len() - 1);
+                    }
+                    "mxGeometry" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                        })?;
+                        let geom = parse_mxgeometry(&reader, &e)?;
+                        let idx = current_cell_idx.ok_or_else(|| {
+                            ParseError::Structure("mxGeometry found but no current mxCell".into())
+                        })?;
+                        gm.root.cells[idx].geometry = Some(geom);
+                    }
+                    _ => {}
+                }
+            }
 
-                    current_graph = Some(gm);
+            Event::Empty(e) => {
+                let name = local_name_start(&e)?;
+                if is_user_object(&name) {
+                    continue;
                 }
-                "mxCell" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxCell outside mxGraphModel".into())
-                    })?;
-                    let cell = parse_mxcell(&reader, &e)?;
-                    gm.root.cells.push(cell);
-                    current_cell_idx = Some(gm.root.cells.len() - 1);
+                if user_object_depth > 0 {
+                    continue;
                 }
-                "mxGeometry" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
-                    })?;
-                    let geom = parse_mxgeometry(&reader, &e)?;
-                    let idx = current_cell_idx.ok_or_else(|| {
-                        ParseError::Structure("mxGeometry found but no current mxCell".into())
-                    })?;
-                    gm.root.cells[idx].geometry = Some(geom);
+                match name.as_str() {
+                    "mxCell" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxCell outside mxGraphModel".into())
+                        })?;
+                        let cell = parse_mxcell(&reader, &e)?;
+                        gm.root.cells.push(cell);
+                    }
+                    "mxGeometry" => {
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxGeometry outside mxGraphModel".into())
+                        })?;
+                        let geom = parse_mxgeometry(&reader, &e)?;
+                        let idx = current_cell_idx.ok_or_else(|| {
+                            ParseError::Structure("mxGeometry found but no current mxCell".into())
+                        })?;
+                        gm.root.cells[idx].geometry = Some(geom);
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
 
-            Event::Empty(e) => match local_name_start(&e)?.as_str() {
-                "mxCell" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxCell outside mxGraphModel".into())
-                    })?;
-                    let cell = parse_mxcell(&reader, &e)?;
-                    gm.root.cells.push(cell);
+            Event::End(e) => {
+                let name = local_name_end(&e)?;
+                if is_user_object(&name) {
+                    user_object_depth = user_object_depth.saturating_sub(1);
+                    continue;
                 }
-                "mxGeometry" => {
-                    let gm = current_graph.as_mut().ok_or_else(|| {
-                        ParseError::Structure("mxGeometry outside mxGraphModel".into())
-                    })?;
-                    let geom = parse_mxgeometry(&reader, &e)?;
-                    let idx = current_cell_idx.ok_or_else(|| {
-                        ParseError::Structure("mxGeometry found but no current mxCell".into())
-                    })?;
-                    gm.root.cells[idx].geometry = Some(geom);
+                if user_object_depth > 0 {
+                    continue;
                 }
-                _ => {}
-            },
-
-            Event::End(e) => match local_name_end(&e)?.as_str() {
-                "mxGraphModel" => {
-                    return current_graph.take().ok_or_else(|| {
-                        ParseError::Structure("closing mxGraphModel but none open".into())
-                    });
+                match name.as_str() {
+                    "mxGraphModel" => {
+                        return current_graph.take().ok_or_else(|| {
+                            ParseError::Structure("closing mxGraphModel but none open".into())
+                        });
+                    }
+                    "mxCell" => {
+                        current_cell_idx = None;
+                    }
+                    _ => {}
                 }
-                "mxCell" => {
-                    current_cell_idx = None;
-                }
-                _ => {}
-            },
+            }
 
             Event::Eof => break,
             _ => {}
@@ -453,6 +519,10 @@ fn local_name_end(e: &BytesEnd<'_>) -> ParseResult<String> {
     Ok(str::from_utf8(e.name().as_ref())?.to_string())
 }
 
+fn is_user_object(name: &str) -> bool {
+    name.eq_ignore_ascii_case("userObject")
+}
+
 fn parse_bool_opt(v: Option<&String>) -> Option<bool> {
     let s = v?;
     match s.as_str() {
@@ -476,10 +546,11 @@ fn parse_i64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<
 
 fn parse_f64_opt(v: Option<&String>, field: &'static str) -> ParseResult<Option<f64>> {
     let Some(s) = v else { return Ok(None) };
-    if s.trim().is_empty() {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
         return Ok(None);
     }
-    let parsed = s.parse::<f64>().map_err(|_| ParseError::InvalidNumber {
+    let parsed = serde_json::from_str::<f64>(trimmed).map_err(|_| ParseError::InvalidNumber {
         field,
         value: s.clone(),
     })?;

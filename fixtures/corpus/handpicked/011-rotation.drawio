@@ -1,0 +1,50 @@
+<mxfile host="65bd71144e">
+    <diagram id="csq-x3ap6Q3cu3J_rsK0" name="Page-1">
+        <mxGraphModel dx="2395" dy="860" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="6" value="" style="edgeStyle=none;html=1;" edge="1" parent="1" source="2" target="5">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="Rotated text" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rotation=45;" vertex="1" connectable="0" parent="6">
+                    <mxGeometry x="-0.0196" y="3" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="2" value="Rotated Rectange" style="rounded=0;whiteSpace=wrap;html=1;rotation=15;" vertex="1" parent="1">
+                    <mxGeometry x="80" y="80" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="Text" style="rounded=0;whiteSpace=wrap;html=1;rotation=-120;" vertex="1" parent="1">
+                    <mxGeometry x="240" y="90" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="" style="endArrow=classic;html=1;rounded=0;curved=0;" edge="1" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="560" y="170" as="sourcePoint"/>
+                        <mxPoint x="370" y="360" as="targetPoint"/>
+                        <Array as="points">
+                            <mxPoint x="530" y="340"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="8" value="" style="edgeStyle=none;html=1;horizontal=0;" edge="1" parent="1" source="5" target="7">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="12" value="Vertical text?" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="8">
+                    <mxGeometry x="-0.0377" y="-3" relative="1" as="geometry">
+                        <mxPoint as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="5" value="" style="rounded=0;whiteSpace=wrap;html=1;rotation=15;" vertex="1" parent="1">
+                    <mxGeometry x="80" y="210" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="7" value="Vertical text in non rotated rectangle" style="whiteSpace=wrap;html=1;rounded=0;horizontal=0;" vertex="1" parent="1">
+                    <mxGeometry x="370" y="210" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="11" value="Center/Center" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="190" y="320" width="120" height="120" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

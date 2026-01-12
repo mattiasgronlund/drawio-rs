@@ -261,20 +261,18 @@ fn render_edge(
     min_x: f64,
     min_y: f64,
 ) -> SvgResult<Option<EdgeRender>> {
-    let source_id = edge
-        .source
-        .as_ref()
-        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
-    let target_id = edge
-        .target
-        .as_ref()
-        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
-    let source = cell_by_id
-        .get(source_id)
-        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
-    let target = cell_by_id
-        .get(target_id)
-        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
+    let Some(source_id) = edge.source.as_ref() else {
+        return Ok(None);
+    };
+    let Some(target_id) = edge.target.as_ref() else {
+        return Ok(None);
+    };
+    let Some(source) = cell_by_id.get(source_id) else {
+        return Ok(None);
+    };
+    let Some(target) = cell_by_id.get(target_id) else {
+        return Ok(None);
+    };
     let source_geo = source
         .geometry
         .as_ref()

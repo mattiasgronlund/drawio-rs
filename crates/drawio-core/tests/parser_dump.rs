@@ -9,14 +9,6 @@ use similar::TextDiff;
 use std::collections::HashSet;
 use walkdir::WalkDir;
 
-fn parse_drawio_to_json(drawio_xml: &str) -> serde_json::Value {
-    // Example shape:
-    // let mx: drawio_core::model::MxFile = drawio_core::parse_mxfile(drawio_xml).unwrap();
-    // serde_json::to_value(&mx).unwrap()
-    let mx = drawio_core::parse_mxfile(drawio_xml).expect("parse mxfile");
-    serde_json::to_value(&mx).expect("mxfile -> json")
-}
-
 /// If you want stable comparisons, normalize JSON:
 /// - ensure objects have stable key order (serde_json::Map keeps insertion order, not sorted)
 /// - remove nulls
@@ -194,7 +186,9 @@ fn parser_dump_matches_expected_json() {
         let expected_path = expected_path_for_drawio(path);
 
         let drawio_xml = read_to_string(path);
-        let actual_json_val = parse_drawio_to_json(&drawio_xml);
+        let actual_json_val = drawio_core::parse_mxfile(&drawio_xml)
+            .unwrap_or_else(|err| panic!("parse mxfile for {}: {err}", path.display()));
+        let actual_json_val = serde_json::to_value(&actual_json_val).expect("mxfile -> json");
         let actual_pretty = pretty_json(actual_json_val);
 
         if !expected_path.exists() {

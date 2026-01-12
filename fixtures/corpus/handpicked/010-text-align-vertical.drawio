@@ -1,0 +1,37 @@
+<mxfile host="65bd71144e">
+    <diagram id="xJ5purTcC0syb9rlT2Yg" name="Page-1">
+        <mxGraphModel dx="1317" dy="384" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="2" value="Center/Left" style="rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;" parent="1" vertex="1">
+                    <mxGeometry x="41" y="200" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="3" value="Center/Center" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
+                    <mxGeometry x="202" y="200" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="4" value="Center/Right" style="rounded=0;whiteSpace=wrap;html=1;align=right;" parent="1" vertex="1">
+                    <mxGeometry x="361" y="200" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="5" value="Top/Left" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="41" y="40" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="6" value="Top/Center" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;" parent="1" vertex="1">
+                    <mxGeometry x="202" y="40" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="7" value="Top/Right" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=right;" parent="1" vertex="1">
+                    <mxGeometry x="361" y="40" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" value="Bottom/Left" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=left;" parent="1" vertex="1">
+                    <mxGeometry x="41" y="360" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="9" value="Bottom/Center" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;" parent="1" vertex="1">
+                    <mxGeometry x="202" y="360" width="120" height="120" as="geometry"/>
+                </mxCell>
+                <mxCell id="10" value="Bottom/Right" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=right;" parent="1" vertex="1">
+                    <mxGeometry x="361" y="360" width="120" height="120" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

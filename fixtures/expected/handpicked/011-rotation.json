@@ -1,0 +1,178 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 2395,
+        "dy": 860,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "6",
+              "parent": "1",
+              "source": "2",
+              "style": "edgeStyle=none;html=1;",
+              "target": "5",
+              "value": ""
+            },
+            {
+              "extra": {
+                "connectable": "0"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true,
+                "x": -0.0196,
+                "y": 3
+              },
+              "id": "10",
+              "parent": "6",
+              "style": "edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];rotation=45;",
+              "value": "Rotated text",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 80,
+                "y": 80
+              },
+              "id": "2",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;rotation=15;",
+              "value": "Rotated Rectange",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 240,
+                "y": 90
+              },
+              "id": "3",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;rotation=-120;",
+              "value": "Text",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "relative": true,
+                "width": 50
+              },
+              "id": "4",
+              "parent": "1",
+              "style": "endArrow=classic;html=1;rounded=0;curved=0;",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "8",
+              "parent": "1",
+              "source": "5",
+              "style": "edgeStyle=none;html=1;horizontal=0;",
+              "target": "7",
+              "value": ""
+            },
+            {
+              "extra": {
+                "connectable": "0"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true,
+                "x": -0.0377,
+                "y": -3
+              },
+              "id": "12",
+              "parent": "8",
+              "style": "edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];",
+              "value": "Vertical text?",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 80,
+                "y": 210
+              },
+              "id": "5",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;rotation=15;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 370,
+                "y": 210
+              },
+              "id": "7",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;rounded=0;horizontal=0;",
+              "value": "Vertical text in non rotated rectangle",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 190,
+                "y": 320
+              },
+              "id": "11",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "Center/Center",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "csq-x3ap6Q3cu3J_rsK0",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

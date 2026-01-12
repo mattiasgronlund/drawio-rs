@@ -1,0 +1,441 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 5268,
+        "dy": 1892,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "extra": {
+                "visible": "0"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 100,
+                "x": 1160,
+                "y": 850
+              },
+              "id": "42",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"elbowEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\"};",
+              "value": "Division",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 160,
+                "width": 140,
+                "x": 70,
+                "y": 240
+              },
+              "id": "60",
+              "parent": "1",
+              "style": "swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=30;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;whiteSpace=wrap;html=1;",
+              "value": "List",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 140,
+                "y": 30
+              },
+              "id": "61",
+              "parent": "60",
+              "style": "text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;",
+              "value": "Item 1",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 140,
+                "y": 60
+              },
+              "id": "62",
+              "parent": "60",
+              "style": "text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;",
+              "value": "Item 2",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 40,
+                "width": 140,
+                "y": 90
+              },
+              "id": "63",
+              "parent": "60",
+              "style": "text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;",
+              "value": "Item 1",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 140,
+                "y": 130
+              },
+              "id": "64",
+              "parent": "60",
+              "style": "text;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;spacingLeft=4;spacingRight=4;overflow=hidden;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;rotatable=0;whiteSpace=wrap;html=1;",
+              "value": "Item 3",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 200,
+                "width": 200,
+                "x": 290,
+                "y": 180
+              },
+              "id": "65",
+              "parent": "1",
+              "style": "swimlane;whiteSpace=wrap;html=1;",
+              "value": "Vertical Container",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 30,
+                "x": 65,
+                "y": 90
+              },
+              "id": "66",
+              "parent": "65",
+              "style": "shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;",
+              "value": "Actor",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 100,
+                "x": 530,
+                "y": 940
+              },
+              "id": "67",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"elbowEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\"};",
+              "value": "Division",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "68",
+              "parent": "1",
+              "source": "72",
+              "style": "edgeStyle=elbowEdgeStyle;elbow=vertical;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;curved=0;",
+              "target": "67",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "69",
+              "parent": "1",
+              "style": "edgeStyle=orthogonalEdgeStyle;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;targetPortConstraint=eastwest;sourcePortConstraint=northsouth;curved=0;rounded=0;",
+              "target": "71",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "70",
+              "parent": "1",
+              "source": "73",
+              "style": "edgeStyle=orthogonalEdgeStyle;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;startArrow=none;endArrow=none;rounded=0;targetPortConstraint=eastwest;sourcePortConstraint=northsouth;curved=0;rounded=0;",
+              "target": "72",
+              "value": ""
+            },
+            {
+              "extra": {
+                "collapsed": "1"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 100,
+                "x": 280,
+                "y": 800
+              },
+              "id": "71",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;",
+              "value": "asdfasdf",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 100,
+                "x": 400,
+                "y": 800
+              },
+              "id": "72",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;align=center;verticalAlign=middle;treeFolding=1;treeMoving=1;",
+              "value": "asdfasdf<div>as</div>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 80,
+                "x": 590,
+                "y": 440
+              },
+              "id": "74",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;snapToPoint=1;recursiveResize=0;autosize=1;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Branch",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "75",
+              "parent": "1",
+              "source": "82",
+              "style": "edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;exitX=1;exitY=0.5;exitDx=0;exitDy=0;",
+              "target": "74",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 190,
+                "width": 500,
+                "x": 20,
+                "y": 460
+              },
+              "id": "76",
+              "parent": "1",
+              "style": "swimlane;startSize=20;horizontal=1;containerType=tree;",
+              "value": "Mindmap",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "77",
+              "parent": "76",
+              "source": "81",
+              "style": "edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;",
+              "target": "82",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "78",
+              "parent": "76",
+              "source": "81",
+              "style": "edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;",
+              "target": "83",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "79",
+              "parent": "76",
+              "source": "81",
+              "style": "edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;",
+              "target": "84",
+              "value": ""
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "80",
+              "parent": "76",
+              "source": "81",
+              "style": "edgeStyle=entityRelationEdgeStyle;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;",
+              "target": "85",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 40,
+                "width": 100,
+                "x": 160,
+                "y": 60
+              },
+              "id": "81",
+              "parent": "76",
+              "style": "ellipse;whiteSpace=wrap;html=1;align=center;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Central Idea",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 20,
+                "width": 80,
+                "x": 320,
+                "y": 40
+              },
+              "id": "82",
+              "parent": "76",
+              "style": "whiteSpace=wrap;html=1;rounded=1;arcSize=50;align=center;verticalAlign=middle;strokeWidth=1;autosize=1;spacing=4;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Topic",
+              "vertex": true
+            },
+            {
+              "extra": {
+                "visible": "0"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 26,
+                "width": 72,
+                "x": 320,
+                "y": 80
+              },
+              "id": "83",
+              "parent": "76",
+              "style": "whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;snapToPoint=1;autosize=1;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Branch",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 20,
+                "width": 80,
+                "x": 20,
+                "y": 40
+              },
+              "id": "84",
+              "parent": "76",
+              "style": "whiteSpace=wrap;html=1;rounded=1;arcSize=50;align=center;verticalAlign=middle;strokeWidth=1;autosize=1;spacing=4;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Topic",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 26,
+                "width": 72,
+                "x": 20,
+                "y": 80
+              },
+              "id": "85",
+              "parent": "76",
+              "style": "whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;snapToPoint=1;autosize=1;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Branch",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "86",
+              "parent": "1",
+              "source": "87",
+              "style": "edgeStyle=entityRelationEdgeStyle;html=1;startArrow=none;endArrow=none;segment=10;curved=1;sourcePerimeterSpacing=0;targetPerimeterSpacing=0;",
+              "target": "88",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 80,
+                "x": 640,
+                "y": 510
+              },
+              "id": "87",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;snapToPoint=1;recursiveResize=0;autosize=1;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Branch",
+              "vertex": true
+            },
+            {
+              "extra": {
+                "collapsed": "1"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 30,
+                "width": 80,
+                "x": 530,
+                "y": 560
+              },
+              "id": "88",
+              "parent": "1",
+              "style": "whiteSpace=wrap;html=1;shape=partialRectangle;top=0;left=0;bottom=1;right=0;points=[[0,1],[1,1]];fillColor=none;align=center;verticalAlign=bottom;routingCenterY=0.5;snapToPoint=1;recursiveResize=0;autosize=1;treeFolding=1;treeMoving=1;newEdgeStyle={\"edgeStyle\":\"entityRelationEdgeStyle\",\"startArrow\":\"none\",\"endArrow\":\"none\",\"segment\":10,\"curved\":1,\"sourcePerimeterSpacing\":0,\"targetPerimeterSpacing\":0};",
+              "value": "Branch",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "pxO1q5zmBDBoQEhWFcjs",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

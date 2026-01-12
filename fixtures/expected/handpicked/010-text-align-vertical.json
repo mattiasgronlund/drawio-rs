@@ -1,0 +1,163 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 1317,
+        "dy": 384,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 200
+              },
+              "id": "2",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;",
+              "value": "Center/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 200
+              },
+              "id": "3",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "Center/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 200
+              },
+              "id": "4",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=right;",
+              "value": "Center/Right",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 40
+              },
+              "id": "5",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;",
+              "value": "Top/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 40
+              },
+              "id": "6",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;",
+              "value": "Top/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 40
+              },
+              "id": "7",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=right;",
+              "value": "Top/Right",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 360
+              },
+              "id": "8",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=left;",
+              "value": "Bottom/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 360
+              },
+              "id": "9",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;",
+              "value": "Bottom/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 360
+              },
+              "id": "10",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=right;",
+              "value": "Bottom/Right",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "xJ5purTcC0syb9rlT2Yg",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

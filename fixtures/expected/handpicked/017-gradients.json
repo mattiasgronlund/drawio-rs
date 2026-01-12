@@ -4,8 +4,8 @@
       "graph_model": {
         "arrows": true,
         "connect": true,
-        "dx": -484,
-        "dy": -67,
+        "dx": 1317,
+        "dy": 473,
         "fold": false,
         "grid": false,
         "grid_size": 10,
@@ -103,6 +103,5 @@
       "name": "Page-1"
     }
   ],
-  "host": "Electron",
-  "version": "29.0.3"
+  "host": "65bd71144e"
 }

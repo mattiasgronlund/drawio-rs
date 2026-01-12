@@ -1,0 +1,314 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 3293,
+        "dy": 1183,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 280,
+                "x": 230.00000000000045,
+                "y": 10
+              },
+              "id": "2",
+              "parent": "1",
+              "style": "swimlane;childLayout=stackLayout;resizeParent=1;resizeParentMax=0;startSize=20;html=1;",
+              "value": "Pool",
+              "vertex": true
+            },
+            {
+              "extra": {
+                "collapsed": "1"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 460,
+                "width": 40,
+                "y": 20
+              },
+              "id": "3",
+              "parent": "2",
+              "style": "swimlane;startSize=20;html=1;",
+              "value": "Lane 1",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 80,
+                "width": 80,
+                "x": 19.999999999999545,
+                "y": 50
+              },
+              "id": "4",
+              "parent": "3",
+              "style": "shape=tapeData;whiteSpace=wrap;html=1;perimeter=ellipsePerimeter;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 40,
+                "x": 39.999999999999545,
+                "y": 170
+              },
+              "id": "5",
+              "parent": "3",
+              "style": "shape=actor;whiteSpace=wrap;html=1;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 460,
+                "width": 120,
+                "x": 40,
+                "y": 20
+              },
+              "id": "6",
+              "parent": "2",
+              "style": "swimlane;startSize=20;html=1;",
+              "value": "Lane 2",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 60,
+                "x": 19.999999999999545,
+                "y": 70
+              },
+              "id": "7",
+              "parent": "6",
+              "style": "shape=datastore;whiteSpace=wrap;html=1;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 460,
+                "width": 120,
+                "x": 160,
+                "y": 20
+              },
+              "id": "8",
+              "parent": "2",
+              "style": "swimlane;startSize=20;html=1;",
+              "value": "Lane 3",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 60,
+                "x": 39.999999999999545,
+                "y": 220
+              },
+              "id": "9",
+              "parent": "8",
+              "style": "shape=switch;whiteSpace=wrap;html=1;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 380,
+                "x": 620,
+                "y": 20
+              },
+              "id": "10",
+              "parent": "1",
+              "style": "swimlane;childLayout=stackLayout;resizeParent=1;resizeParentMax=0;startSize=20;horizontal=0;horizontalStack=1;",
+              "value": "Pool",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 120,
+                "x": 20
+              },
+              "id": "11",
+              "parent": "10",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 1",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "y": 150
+              },
+              "id": "12",
+              "parent": "11",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "In pool",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 120,
+                "x": 140
+              },
+              "id": "13",
+              "parent": "10",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 2",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 120,
+                "x": 260
+              },
+              "id": "14",
+              "parent": "10",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 3",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 350,
+                "y": 300
+              },
+              "id": "15",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 300,
+                "x": 220,
+                "y": 560
+              },
+              "id": "16",
+              "parent": "1",
+              "style": "swimlane;childLayout=stackLayout;resizeParent=1;resizeParentMax=0;startSize=20;horizontal=0;horizontalStack=1;",
+              "value": "Pool",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 120,
+                "x": 20
+              },
+              "id": "17",
+              "parent": "16",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 1",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "y": 70
+              },
+              "id": "18",
+              "parent": "17",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "In pool",
+              "vertex": true
+            },
+            {
+              "extra": {
+                "collapsed": "1"
+              },
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 40,
+                "x": 140
+              },
+              "id": "19",
+              "parent": "16",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 2",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 100,
+                "x": 10,
+                "y": 150
+              },
+              "id": "20",
+              "parent": "19",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "In pool",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 480,
+                "width": 120,
+                "x": 180
+              },
+              "id": "21",
+              "parent": "16",
+              "style": "swimlane;startSize=20;",
+              "value": "Lane 3",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "dRuEptg7ODBBCbe6b8hb",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

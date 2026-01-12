@@ -1,59 +1,59 @@
 <mxfile host="65bd71144e">
     <diagram id="69-gvitrH2Jx2BodBqbs" name="Page-1">
-        <mxGraphModel dx="1533" dy="694" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="1317" dy="473" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
-                <mxCell id="4" value="Center/Left" style="rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
-                    <mxGeometry x="41" y="200" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="5" value="Center/Center" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-                    <mxGeometry x="202" y="200" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="6" value="Center/Right" style="rounded=0;whiteSpace=wrap;html=1;align=right;" vertex="1" parent="1">
-                    <mxGeometry x="361" y="200" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="8" value="Top/Left" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;" vertex="1" parent="1">
-                    <mxGeometry x="41" y="40" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="9" value="Top/Center" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;" vertex="1" parent="1">
-                    <mxGeometry x="202" y="40" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="10" value="Top/Right" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=right;" vertex="1" parent="1">
-                    <mxGeometry x="361" y="40" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="11" value="Bottom/Left" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=left;" vertex="1" parent="1">
-                    <mxGeometry x="41" y="360" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="12" value="Bottom/Center" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;" vertex="1" parent="1">
-                    <mxGeometry x="202" y="360" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="13" value="Bottom/Right" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=right;" vertex="1" parent="1">
-                    <mxGeometry x="361" y="360" width="120" height="120" as="geometry"/>
-                </mxCell>
-                <mxCell id="14" value="&lt;i&gt;Italics&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                <mxCell id="14" value="&lt;i&gt;Italics&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
                     <mxGeometry x="520" y="40" width="120" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="15" value="&lt;b&gt;Bold&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                <mxCell id="15" value="&lt;b&gt;Bold&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
                     <mxGeometry x="520" y="110" width="120" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="16" value="&lt;b&gt;&lt;i&gt;Bold/Italic&lt;/i&gt;&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                <mxCell id="16" value="&lt;b&gt;&lt;i&gt;Bold/Italic&lt;/i&gt;&lt;/b&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
                     <mxGeometry x="680" y="40" width="120" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="17" value="&lt;sub&gt;Subscriot&lt;/sub&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                <mxCell id="17" value="&lt;sub&gt;Subscript&lt;/sub&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
                     <mxGeometry x="680" y="110" width="120" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="18" value="&lt;sup&gt;SuperScript&lt;/sup&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                <mxCell id="18" value="&lt;sup&gt;SuperScript&lt;/sup&gt;" style="rounded=0;whiteSpace=wrap;html=1;" parent="1" vertex="1">
                     <mxGeometry x="520" y="200" width="120" height="50" as="geometry"/>
                 </mxCell>
-                <mxCell id="19" value="Text&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;div&gt;Indented text&lt;br&gt;Same indentation&lt;/div&gt;&lt;/blockquote&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;div&gt;Indented even more&lt;/div&gt;&lt;/blockquote&gt;&lt;/blockquote&gt;&lt;br&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" vertex="1" parent="1">
+                <mxCell id="19" value="Text&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;div&gt;Indented text&lt;br&gt;Same indentation&lt;/div&gt;&lt;/blockquote&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;div&gt;Indented even more&lt;/div&gt;&lt;/blockquote&gt;&lt;/blockquote&gt;&lt;br&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="520" y="280" width="210" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="20" value="Text&lt;div&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;&lt;/div&gt;&lt;div&gt;&lt;ul&gt;&lt;li&gt;1st Bullet&lt;/li&gt;&lt;li&gt;2nd Bullet&lt;/li&gt;&lt;/ul&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" vertex="1" parent="1">
+                <mxCell id="20" value="Text&lt;div&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;&lt;/div&gt;&lt;div&gt;&lt;ul&gt;&lt;li&gt;1st Bullet&lt;/li&gt;&lt;li&gt;2nd Bullet&lt;/li&gt;&lt;/ul&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="520" y="400" width="210" height="100" as="geometry"/>
                 </mxCell>
-                <mxCell id="21" value="Text&lt;div&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;&lt;/div&gt;&lt;div&gt;&lt;ol&gt;&lt;li&gt;&lt;span style=&quot;color: rgb(192, 192, 192); background-color: transparent;&quot;&gt;1st Numbered&lt;/span&gt;&lt;/li&gt;&lt;li&gt;&lt;span style=&quot;color: rgb(192, 192, 192); background-color: transparent;&quot;&gt;2nd Numbered&lt;/span&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" vertex="1" parent="1">
+                <mxCell id="21" value="Text&lt;div&gt;&lt;blockquote style=&quot;margin: 0 0 0 40px; border: none; padding: 0px;&quot;&gt;&lt;/blockquote&gt;&lt;/div&gt;&lt;div&gt;&lt;ol&gt;&lt;li&gt;&lt;span style=&quot;color: rgb(192, 192, 192); background-color: transparent;&quot;&gt;1st Numbered&lt;/span&gt;&lt;/li&gt;&lt;li&gt;&lt;span style=&quot;color: rgb(192, 192, 192); background-color: transparent;&quot;&gt;2nd Numbered&lt;/span&gt;&lt;/li&gt;&lt;/ol&gt;&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;align=left;" parent="1" vertex="1">
                     <mxGeometry x="520" y="520" width="210" height="100" as="geometry"/>
+                </mxCell>
+                <mxCell id="22" value="&lt;span style=&quot;color: rgb(192, 192, 192); scrollbar-color: rgb(75, 75, 75) rgb(27, 29, 30);&quot;&gt;&lt;span style=&quot;color: rgb(192, 192, 192); scrollbar-color: rgb(75, 75, 75) rgb(27, 29, 30);&quot;&gt;&lt;span style=&quot;color: rgb(192, 192, 192); scrollbar-color: rgb(75, 75, 75) rgb(27, 29, 30);&quot;&gt;&lt;strike&gt;Strikethrough&lt;/strike&gt;&lt;/span&gt;&lt;/span&gt;&lt;/span&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="680" y="200" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="23" value="&lt;u style=&quot;&quot;&gt;Underlined&lt;/u&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="360" y="40" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="24" value="&lt;u style=&quot;&quot;&gt;&lt;i&gt;Underlined/Italic&lt;/i&gt;&lt;/u&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="360" y="120" width="120" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="25" value="&lt;u style=&quot;&quot;&gt;&lt;i&gt;&lt;b&gt;Bold/Underlined/Italic&lt;/b&gt;&lt;/i&gt;&lt;/u&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="330" y="190" width="150" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="28" value="&lt;i&gt;&lt;b&gt;&lt;u&gt;&lt;strike&gt;Bold/Underlined/Italic/Strikethrough&lt;/strike&gt;&lt;/u&gt;&lt;/b&gt;&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="250" y="270" width="230" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="29" value="&lt;i&gt;&lt;b&gt;&lt;u&gt;&lt;strike&gt;&lt;sub&gt;Bold/Underlined/Italic/Strikethrough/Subscript&lt;/sub&gt;&lt;/strike&gt;&lt;/u&gt;&lt;/b&gt;&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="30" y="360" width="360" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="30" value="&lt;i&gt;&lt;b&gt;&lt;u&gt;&lt;strike&gt;&lt;sup&gt;Bold/Underlined/Italic/Strikethrough/SuperScript&lt;/sup&gt;&lt;/strike&gt;&lt;/u&gt;&lt;/b&gt;&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="30" y="425" width="360" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="31" value="&lt;i&gt;&lt;b&gt;&lt;sup style=&quot;&quot;&gt;&lt;u&gt;&lt;strike&gt;Bold/Underlined/Italic/Strikethrough/SuperScript&lt;/strike&gt;&lt;/u&gt;&lt;/sup&gt;&lt;/b&gt;&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="30" y="510" width="360" height="50" as="geometry"/>
+                </mxCell>
+                <mxCell id="32" value="&lt;b&gt;Bold&lt;/b&gt; / &lt;u&gt;Underlined&lt;/u&gt; / &lt;i&gt;Italic&lt;/i&gt; / &lt;strike&gt;Strikethrough&lt;/strike&gt; / &lt;sub&gt;SubScript&lt;/sub&gt; / &lt;sup&gt;SuperScript&lt;/sup&gt;&amp;nbsp;" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+                    <mxGeometry x="30" y="600" width="360" height="50" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>
