@@ -1,0 +1,146 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 745,
+        "dy": 246,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "14",
+              "parent": "1",
+              "source": "2",
+              "style": "edgeStyle=none;html=1;strokeWidth=2;",
+              "target": "9",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 40,
+                "y": 40
+              },
+              "id": "2",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;strokeWidth=3;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "15",
+              "parent": "1",
+              "source": "9",
+              "style": "edgeStyle=none;html=1;strokeWidth=3;",
+              "target": "11",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 200,
+                "y": 40
+              },
+              "id": "9",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;perimeterSpacing=3;dashed=1;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 360,
+                "y": 40
+              },
+              "id": "11",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;strokeWidth=6;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "edge": true,
+              "geometry": {
+                "as_attr": "geometry",
+                "relative": true
+              },
+              "id": "16",
+              "parent": "1",
+              "source": "12",
+              "style": "edgeStyle=none;html=1;dashed=1;",
+              "target": "13",
+              "value": ""
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 200,
+                "y": 120
+              },
+              "id": "12",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#60a917;fontColor=#ffffff;strokeColor=#2D7600;",
+              "value": "",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 60,
+                "width": 120,
+                "x": 360,
+                "y": 120
+              },
+              "id": "13",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;fillColor=#6a00ff;fontColor=#ffffff;strokeColor=#3700CC;",
+              "value": "",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "tVe6C-sasVkmNJzP6pbC",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}

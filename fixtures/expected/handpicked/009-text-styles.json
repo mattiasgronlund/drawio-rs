@@ -1,0 +1,275 @@
+{
+  "diagrams": [
+    {
+      "graph_model": {
+        "arrows": true,
+        "connect": true,
+        "dx": 1533,
+        "dy": 694,
+        "fold": true,
+        "grid": true,
+        "grid_size": 10,
+        "guides": true,
+        "math": false,
+        "page": true,
+        "page_height": 1169,
+        "page_scale": 1,
+        "page_width": 827,
+        "root": {
+          "cells": [
+            {
+              "id": "0"
+            },
+            {
+              "id": "1",
+              "parent": "0"
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 200
+              },
+              "id": "4",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=left;verticalAlign=middle;",
+              "value": "Center/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 200
+              },
+              "id": "5",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "Center/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 200
+              },
+              "id": "6",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=right;",
+              "value": "Center/Right",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 40
+              },
+              "id": "8",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;",
+              "value": "Top/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 40
+              },
+              "id": "9",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;",
+              "value": "Top/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 40
+              },
+              "id": "10",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=right;",
+              "value": "Top/Right",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 41,
+                "y": 360
+              },
+              "id": "11",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=left;",
+              "value": "Bottom/Left",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 202,
+                "y": 360
+              },
+              "id": "12",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;",
+              "value": "Bottom/Center",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 120,
+                "width": 120,
+                "x": 361,
+                "y": 360
+              },
+              "id": "13",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;verticalAlign=bottom;align=right;",
+              "value": "Bottom/Right",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "width": 120,
+                "x": 520,
+                "y": 40
+              },
+              "id": "14",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "<i>Italics</i>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "width": 120,
+                "x": 520,
+                "y": 110
+              },
+              "id": "15",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "<b>Bold</b>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "width": 120,
+                "x": 680,
+                "y": 40
+              },
+              "id": "16",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "<b><i>Bold/Italic</i></b>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "width": 120,
+                "x": 680,
+                "y": 110
+              },
+              "id": "17",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "<sub>Subscriot</sub>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 50,
+                "width": 120,
+                "x": 520,
+                "y": 200
+              },
+              "id": "18",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;",
+              "value": "<sup>SuperScript</sup>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 100,
+                "width": 210,
+                "x": 520,
+                "y": 280
+              },
+              "id": "19",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=left;",
+              "value": "Text<blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"><div>Indented text<br>Same indentation</div></blockquote><blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"><blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"><div>Indented even more</div></blockquote></blockquote><br><blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"></blockquote>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 100,
+                "width": 210,
+                "x": 520,
+                "y": 400
+              },
+              "id": "20",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=left;",
+              "value": "Text<div><blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"></blockquote></div><div><ul><li>1st Bullet</li><li>2nd Bullet</li></ul></div>",
+              "vertex": true
+            },
+            {
+              "geometry": {
+                "as_attr": "geometry",
+                "height": 100,
+                "width": 210,
+                "x": 520,
+                "y": 520
+              },
+              "id": "21",
+              "parent": "1",
+              "style": "rounded=0;whiteSpace=wrap;html=1;align=left;",
+              "value": "Text<div><blockquote style=\"margin: 0 0 0 40px; border: none; padding: 0px;\"></blockquote></div><div><ol><li><span style=\"color: rgb(192, 192, 192); background-color: transparent;\">1st Numbered</span></li><li><span style=\"color: rgb(192, 192, 192); background-color: transparent;\">2nd Numbered</span></li></ol></div>",
+              "vertex": true
+            }
+          ]
+        },
+        "shadow": false,
+        "tooltips": true
+      },
+      "id": "69-gvitrH2Jx2BodBqbs",
+      "name": "Page-1"
+    }
+  ],
+  "host": "65bd71144e"
+}
