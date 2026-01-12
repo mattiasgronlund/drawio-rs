@@ -459,7 +459,7 @@ fn svg_dump_matches_expected_svg() {
         let actual_norm = canonicalize_11_no_comments(actual_svg.as_str()).unwrap();
 
         if expected_norm != actual_norm {
-            if env::var_os("KEEP_NORMALIZED_SVG").is_some() {
+            if env::var_os("KEEP_CANNONICALIZED_SVG").is_some() {
                 let root = workspace_root().join("target").join("normalized-svg");
                 write_normalized_svg(&root, &relative_path, "actual", &actual_norm);
                 write_normalized_svg(&root, &relative_path, "expected", &expected_norm);

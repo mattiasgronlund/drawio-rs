@@ -90,7 +90,7 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
         return Ok(out);
     }
 
-    let mut has_text = false;
+    let mut requires_extensibility = false;
     out.push_str("<g><g data-cell-id=\"0\"><g data-cell-id=\"1\">");
     if !edges.is_empty() {
         for edge in edges {
@@ -103,7 +103,7 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
                 .unwrap();
                 if let Some(label) = edge_render.label {
                     out.push_str(&label);
-                    has_text = true;
+                    requires_extensibility = true;
                 }
                 out.push_str("</g>");
             }
@@ -119,26 +119,33 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
         let y = geometry.y.unwrap_or(0.0) - min_y;
         let width = geometry.width.unwrap_or(0.0);
         let height = geometry.height.unwrap_or(0.0);
+        let style = vertex.style.as_deref();
+        let dash_attr = if is_dashed(style) {
+            " stroke-dasharray=\"3 3\""
+        } else {
+            ""
+        };
         write!(
             out,
-            "<g data-cell-id=\"{}\"><g transform=\"translate(0.5,0.5)\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#ffffff\" stroke=\"#000000\" pointer-events=\"all\" style=\"fill: light-dark(#ffffff, var(--ge-dark-color, #121212)); stroke: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));\"/></g>",
+            "<g data-cell-id=\"{}\"><g transform=\"translate(0.5,0.5)\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"#ffffff\" stroke=\"#000000\" pointer-events=\"all\"{} style=\"fill: light-dark(#ffffff, var(--ge-dark-color, #121212)); stroke: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));\"/></g>",
             vertex.id,
             fmt_num(x),
             fmt_num(y),
             fmt_num(width),
-            fmt_num(height)
+            fmt_num(height),
+            dash_attr
         )
         .unwrap();
         if let Some(label) = render_vertex_label(vertex, x, y, width, height) {
             out.push_str(&label);
-            has_text = true;
+            requires_extensibility = true;
         }
         out.push_str("</g>");
     }
 
     out.push_str("</g></g></g>");
-    if has_text {
-        out.push_str("<switch><g requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"/><a transform=\"translate(0,-5)\" xlink:href=\"https://www.drawio.com/doc/faq/svg-export-text-problems\" target=\"_blank\"><text text-anchor=\"middle\" font-size=\"10px\" x=\"50%\" y=\"100%\">Unsupported SVG features detected.\nPlease view this diagram in a modern web browser.</text></a></switch>");
+    if requires_extensibility {
+        out.push_str(WARNING_SWITCH);
     }
     out.push_str("</svg>");
     Ok(out)
@@ -274,17 +281,23 @@ fn render_vertex_label(vertex: &MxCell, x: f64, y: f64, width: f64, height: f64)
     }
     let label_width = (width - 2.0).max(0.0);
     let center_y = y + height / 2.0;
-    let margin_left = x + 1.0;
+    let style = vertex.style.as_deref();
+    let (justify_content, text_align, margin_offset) = label_alignment(style);
+    let margin_left = x + margin_offset;
     let padding_top = center_y;
+    let bold = is_bold(style);
     let text = escape_html(value);
 
     let mut out = String::new();
     write!(
         out,
-        "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: #000000; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; \">{}</div></div></div></foreignObject>",
+        "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe {}; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: {}; color: #000000; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; {}white-space: normal; word-wrap: normal; \">{}</div></div></div></foreignObject>",
+        justify_content,
         fmt_num(label_width),
         fmt_num(padding_top),
         fmt_num(margin_left),
+        text_align,
+        bold_style(bold),
         text
     )
     .unwrap();
@@ -297,23 +310,59 @@ fn render_edge_label(edge: &MxCell, source_right: f64, target_left: f64, y: f64)
     if value.is_empty() {
         return None;
     }
+    let style = edge.style.as_deref();
     let center_x = (source_right + target_left) / 2.0;
     let center_y = y;
     let margin_left = center_x;
     let padding_top = center_y;
+    let bold = is_bold(style);
     let text = escape_html(value);
 
     let mut out = String::new();
     write!(
         out,
-        "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: 1px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: #000000; background-color: #ffffff; \"><div style=\"display: inline-block; font-size: 11px; font-family: Helvetica; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; background-color: light-dark(#ffffff, var(--ge-dark-color, #121212)); white-space: nowrap; \">{}</div></div></div></foreignObject>",
+        "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: 1px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: #000000; background-color: #ffffff; \"><div style=\"display: inline-block; font-size: 11px; font-family: Helvetica; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; background-color: light-dark(#ffffff, var(--ge-dark-color, #121212)); {}white-space: nowrap; \">{}</div></div></div></foreignObject>",
         fmt_num(padding_top),
         fmt_num(margin_left),
+        bold_style(bold),
         text
     )
     .unwrap();
     out.push_str("</g></g>");
     Some(out)
+}
+
+const WARNING_SWITCH: &str = "<switch><g requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"/><a transform=\"translate(0,-5)\" xlink:href=\"https://www.drawio.com/doc/faq/svg-export-text-problems\" target=\"_blank\"><text text-anchor=\"middle\" font-size=\"10px\" x=\"50%\" y=\"100%\">Unsupported SVG features detected.\nPlease view this diagram in a modern web browser.</text></a></switch>";
+
+fn label_alignment(style: Option<&str>) -> (&'static str, &'static str, f64) {
+    match style_value(style, "align") {
+        Some("left") => ("flex-start", "left", 2.0),
+        Some("right") => ("flex-end", "right", 0.0),
+        _ => ("center", "center", 1.0),
+    }
+}
+
+fn bold_style(is_bold: bool) -> &'static str {
+    if is_bold { "font-weight: bold; " } else { "" }
+}
+
+fn is_bold(style: Option<&str>) -> bool {
+    style_value(style, "fontStyle")
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|value| value & 1 == 1)
+        .unwrap_or(false)
+}
+
+fn is_dashed(style: Option<&str>) -> bool {
+    style_value(style, "dashed") == Some("1")
+}
+
+fn style_value<'a>(style: Option<&'a str>, key: &str) -> Option<&'a str> {
+    let style = style?;
+    style.split(';').find_map(|entry| {
+        let (k, v) = entry.split_once('=')?;
+        if k == key { Some(v) } else { None }
+    })
 }
 
 fn escape_html(input: &str) -> String {

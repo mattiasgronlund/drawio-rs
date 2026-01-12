@@ -18,6 +18,11 @@ test:
 # Update fixtures
 update-fixtures:
   UPDATE_FIXTURES=1 cargo test
+  just test
+
+# Run tests but keep keep cannonicalized svg files
+keep-cannonicalized:
+  KEEP_CANNONICALIZED_SVG=1 cargo test
 
 # Run coverage
 coverage:
