@@ -1,8 +1,9 @@
 use std::{
     env, fs,
-    path::Component,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
+
+use xml_c14n::{CanonicalizationMode, CanonicalizationOptions, canonicalize_xml};
 
 use walkdir::WalkDir;
 
@@ -32,12 +33,38 @@ fn expected_dir() -> PathBuf {
     fixtures_root().join("expected")
 }
 
-fn expected_path_for_drawio(drawio_path: &Path) -> PathBuf {
+fn raw_dir() -> PathBuf {
+    fixtures_root().join("raw")
+}
+
+fn relative_path_for_drawio(drawio_path: &Path) -> PathBuf {
     let rel = drawio_path
         .strip_prefix(corpus_dir())
         .expect("drawio file must be under fixtures/corpus");
 
-    expected_dir().join(rel).with_extension("svg")
+    rel.with_extension("svg")
+}
+
+fn path_for_normalized_svg(root: &Path, path: &Path, role: &str) -> PathBuf {
+    let mut result = PathBuf::new();
+    result = result.join(root);
+    if let Some(parent) = path.parent() {
+        result = result.join(parent);
+    }
+    if let Some(steam) = path.file_stem() {
+        result = result.join(steam)
+    }
+
+    result.join(role).with_added_extension("svg")
+}
+
+fn workspace_root() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(&manifest_dir)
+        .to_path_buf()
 }
 
 fn rel_fixture_path(path: &Path) -> String {
@@ -69,24 +96,32 @@ fn read_to_string(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read {}: {e}", path.display()))
 }
 
-fn normalize_svg(svg: &str) -> String {
-    let mut normalized = strip_content_attribute(svg);
-    normalized.retain(|c| c != '\n' && c != '\r' && c != '\t');
-    normalized.trim().to_string()
+fn canonicalize_11_no_comments(xml: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let options = CanonicalizationOptions {
+        mode: CanonicalizationMode::Canonical1_1,
+        keep_comments: false,
+        inclusive_ns_prefixes: vec![], // only relevant for exclusive c14n modes
+    };
+    let canon = canonicalize_xml(xml, options).map_err(|e| format!("c14n error: {e:?}"))?;
+    Ok(canon)
 }
 
-fn strip_content_attribute(svg: &str) -> String {
-    let attr = " content=\"";
-    if let Some(start) = svg.find(attr) {
-        let after_attr = start + attr.len();
-        if let Some(end_quote) = svg[after_attr..].find('"') {
-            let mut out = String::with_capacity(svg.len());
-            out.push_str(&svg[..start]);
-            out.push_str(&svg[after_attr + end_quote + 1..]);
-            return out;
-        }
+fn write_svg(path: &Path, content: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("Failed to create {}: {e}", parent.display()));
     }
-    svg.to_string()
+    fs::write(path, content)
+        .unwrap_or_else(|e| panic!("Failed to write SVG {}: {e}", path.display()));
+}
+
+fn write_normalized_svg(root: &Path, path: &Path, role: &str, content: &str) {
+    let generated_path = path_for_normalized_svg(root, path, role);
+    write_svg(&generated_path, content);
+}
+
+fn clean_svg(content: &str) -> &str {
+    content
 }
 
 #[test]
@@ -124,32 +159,59 @@ fn svg_dump_matches_expected_svg() {
         if ignore.iter().any(|p| p == &rel_path) {
             continue;
         }
-
-        let expected_path = expected_path_for_drawio(path);
+        let relative_path = relative_path_for_drawio(path);
+        let expected_path = expected_dir().join(&relative_path);
         if !expected_path.exists() {
-            failures.push(format!(
-                "Missing expected SVG for {}\nExpected at: {}",
-                path.display(),
-                expected_path.display()
-            ));
+            if env::var_os("UPDATE_FIXTURES").is_some() {
+                let raw_path = raw_dir().join(&relative_path);
+                if !raw_path.exists() {
+                    failures.push(format!(
+                        "Missing raw SVG for {}\nExpected at: {}",
+                        path.display(),
+                        expected_path.display()
+                    ));
+                }
+                let expected_raw_svg = read_to_string(&raw_path);
+                let expected_norm =
+                    canonicalize_11_no_comments(clean_svg(expected_raw_svg.as_str())).unwrap();
+                write_svg(&expected_path, &expected_norm);
+            } else {
+                failures.push(format!(
+                    "Missing expected SVG for {}\nExpected at: {}, use set UPDATE_FIXTURES env when running test to generated it.",
+                    path.display(),
+                    expected_path.display()
+                ));
+            }
             continue;
         }
 
         let drawio_xml = read_to_string(path);
         let actual_svg = parse_drawio_to_svg(&drawio_xml);
-        let expected_svg = read_to_string(&expected_path);
-
-        let expected_norm = normalize_svg(&expected_svg);
-        let actual_norm = normalize_svg(&actual_svg);
+        let expected_norm = read_to_string(&expected_path);
+        let actual_norm = canonicalize_11_no_comments(&actual_svg).unwrap();
 
         if expected_norm != actual_norm {
-            failures.push(format!(
-                "Mismatch for fixture: {}\nExpected: {}\n--- Expected ---\n{}\n--- Actual ---\n{}",
+            if env::var_os("KEEP_NORMALIZED_SVG").is_some() {
+                let root = workspace_root().join("target").join("normalized-svg");
+                write_normalized_svg(&root, &relative_path, "actual", &actual_norm);
+                write_normalized_svg(&root, &relative_path, "expected", &expected_norm);
+                failures.push(format!(
+                "Mismatch for fixture: {}\nExpected: {}\n--- Expected ---\n{}\n--- Actual ---\n{}\n--- Files at ---\n{}",
                 path.display(),
                 expected_path.display(),
                 expected_norm,
-                actual_norm
+                actual_norm,
+                root.display(),
             ));
+            } else {
+                failures.push(format!(
+                    "Mismatch for fixture: {}\nExpected: {}\n--- Expected ---\n{}\n--- Actual ---\n{}",
+                    path.display(),
+                    expected_path.display(),
+                    expected_norm,
+                    actual_norm
+                ));
+            };
         }
     }
 

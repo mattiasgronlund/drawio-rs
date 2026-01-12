@@ -2,6 +2,14 @@
 default:
   @just --list --justfile {{justfile()}}
 
+validate: test format lint
+
+lint:
+  cargo clippy --all-targets -- -D warnings
+
+format:
+  cargo fmt
+
 # Run all tests
 test:
   cargo test

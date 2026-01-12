@@ -16,7 +16,7 @@ This repository uses Codex-driven tasks. When working on tasks, follow these rul
 ## Development workflow
 
 - Use the devcontainer when possible.
-- Run these before opening a PR:
+- Run these before providing a patch:
   - `cargo fmt`
   - `cargo clippy --all-targets -- -D warnings`
   - `cargo test -p drawio-core`
@@ -25,9 +25,10 @@ This repository uses Codex-driven tasks. When working on tasks, follow these rul
 
 - Golden tests live under `crates/drawio-core/tests/`.
 - Fixture inputs: `fixtures/corpus/**.drawio`
-- Expected outputs: `fixtures/expected/**.json`
-- Updating fixtures is allowed only when explicitly requested, using:
-  - `UPDATE_FIXTURES=1 cargo test -p drawio-core`
+- Expected outputs:
+  - `fixtures/expected/**.json`
+  - `fixtures/expected/**.svg`
+- Updating fixtures is not allowed
 
 ## PR conventions
 

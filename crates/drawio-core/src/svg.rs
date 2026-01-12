@@ -267,20 +267,12 @@ fn fmt_num(value: f64) -> String {
     s
 }
 
-fn render_vertex_label(
-    vertex: &MxCell,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Option<String> {
+fn render_vertex_label(vertex: &MxCell, x: f64, y: f64, width: f64, height: f64) -> Option<String> {
     let value = vertex.value.as_deref()?.trim();
     if value.is_empty() {
         return None;
     }
-    let font_size = 12.0;
     let label_width = (width - 2.0).max(0.0);
-    let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
     let margin_left = x + 1.0;
     let padding_top = center_y;
@@ -305,7 +297,6 @@ fn render_edge_label(edge: &MxCell, source_right: f64, target_left: f64, y: f64)
     if value.is_empty() {
         return None;
     }
-    let font_size = 11.0;
     let center_x = (source_right + target_left) / 2.0;
     let center_y = y;
     let margin_left = center_x;
