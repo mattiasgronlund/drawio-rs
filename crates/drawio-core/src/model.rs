@@ -176,4 +176,38 @@ pub struct MxGeometry {
 
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub extra: BTreeMap<String, String>,
+
+    #[serde(skip)]
+    pub source_point: Option<MxPoint>,
+
+    #[serde(skip)]
+    pub target_point: Option<MxPoint>,
+
+    #[serde(skip)]
+    pub offset_point: Option<MxPoint>,
+
+    #[serde(skip)]
+    pub points: Vec<MxPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MxPoint {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serde_f64::ser_opt_f64_compact",
+        deserialize_with = "serde_f64::de_opt_f64"
+    )]
+    pub x: Option<f64>,
+
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serde_f64::ser_opt_f64_compact",
+        deserialize_with = "serde_f64::de_opt_f64"
+    )]
+    pub y: Option<f64>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub as_attr: Option<String>,
 }

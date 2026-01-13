@@ -72,6 +72,8 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
     let mut current_graph: Option<MxGraphModel> = None;
 
     let mut current_cell_idx: Option<usize> = None;
+    let mut current_geometry_cell_idx: Option<usize> = None;
+    let mut in_points_array: bool = false;
     let mut user_object_depth: usize = 0;
 
     loop {
@@ -153,6 +155,26 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
                         gm.root.cells[idx].geometry = Some(geom);
+                        current_geometry_cell_idx = Some(idx);
+                    }
+                    "Array" => {
+                        if current_geometry_cell_idx.is_some() && attr_is(&e, "as", "points")? {
+                            in_points_array = true;
+                        }
+                    }
+                    "mxPoint" => {
+                        let idx = match current_geometry_cell_idx {
+                            Some(idx) => idx,
+                            None => continue,
+                        };
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint outside mxGraphModel".into())
+                        })?;
+                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint found but no current mxGeometry".into())
+                        })?;
+                        let point = parse_mxpoint(&reader, &e)?;
+                        assign_geometry_point(geom, point, in_points_array);
                     }
                     _ => {}
                 }
@@ -198,6 +220,21 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
                         gm.root.cells[idx].geometry = Some(geom);
+                        current_geometry_cell_idx = Some(idx);
+                    }
+                    "mxPoint" => {
+                        let idx = match current_geometry_cell_idx {
+                            Some(idx) => idx,
+                            None => continue,
+                        };
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint outside mxGraphModel".into())
+                        })?;
+                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint found but no current mxGeometry".into())
+                        })?;
+                        let point = parse_mxpoint(&reader, &e)?;
+                        assign_geometry_point(geom, point, in_points_array);
                     }
                     _ => {}
                 }
@@ -273,6 +310,13 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                     "mxCell" => {
                         current_cell_idx = None;
                     }
+                    "mxGeometry" => {
+                        current_geometry_cell_idx = None;
+                        in_points_array = false;
+                    }
+                    "Array" => {
+                        in_points_array = false;
+                    }
                     _ => {}
                 }
             }
@@ -313,6 +357,8 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
     let mut buf = Vec::new();
     let mut current_graph: Option<MxGraphModel> = None;
     let mut current_cell_idx: Option<usize> = None;
+    let mut current_geometry_cell_idx: Option<usize> = None;
+    let mut in_points_array: bool = false;
     let mut user_object_depth: usize = 0;
 
     loop {
@@ -380,6 +426,26 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
                         gm.root.cells[idx].geometry = Some(geom);
+                        current_geometry_cell_idx = Some(idx);
+                    }
+                    "Array" => {
+                        if current_geometry_cell_idx.is_some() && attr_is(&e, "as", "points")? {
+                            in_points_array = true;
+                        }
+                    }
+                    "mxPoint" => {
+                        let idx = match current_geometry_cell_idx {
+                            Some(idx) => idx,
+                            None => continue,
+                        };
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint outside mxGraphModel".into())
+                        })?;
+                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint found but no current mxGeometry".into())
+                        })?;
+                        let point = parse_mxpoint(&reader, &e)?;
+                        assign_geometry_point(geom, point, in_points_array);
                     }
                     _ => {}
                 }
@@ -410,6 +476,26 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
                         gm.root.cells[idx].geometry = Some(geom);
+                        current_geometry_cell_idx = Some(idx);
+                    }
+                    "Array" => {
+                        if current_geometry_cell_idx.is_some() && attr_is(&e, "as", "points")? {
+                            in_points_array = true;
+                        }
+                    }
+                    "mxPoint" => {
+                        let idx = match current_geometry_cell_idx {
+                            Some(idx) => idx,
+                            None => continue,
+                        };
+                        let gm = current_graph.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint outside mxGraphModel".into())
+                        })?;
+                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                            ParseError::Structure("mxPoint found but no current mxGeometry".into())
+                        })?;
+                        let point = parse_mxpoint(&reader, &e)?;
+                        assign_geometry_point(geom, point, in_points_array);
                     }
                     _ => {}
                 }
@@ -432,6 +518,13 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                     }
                     "mxCell" => {
                         current_cell_idx = None;
+                    }
+                    "mxGeometry" => {
+                        current_geometry_cell_idx = None;
+                        in_points_array = false;
+                    }
+                    "Array" => {
+                        in_points_array = false;
                     }
                     _ => {}
                 }
@@ -497,7 +590,44 @@ fn parse_mxgeometry<R: BufRead>(
         relative: parse_bool_opt(attrs.get("relative")),
         as_attr: attrs.get("as").cloned(),
         extra,
+        source_point: None,
+        target_point: None,
+        offset_point: None,
+        points: Vec::new(),
     })
+}
+
+fn parse_mxpoint<R: BufRead>(_reader: &Reader<R>, e: &BytesStart<'_>) -> ParseResult<MxPoint> {
+    let attrs = attrs_to_map(e)?;
+    Ok(MxPoint {
+        x: parse_f64_opt(attrs.get("x"), "x")?,
+        y: parse_f64_opt(attrs.get("y"), "y")?,
+        as_attr: attrs.get("as").cloned(),
+    })
+}
+
+fn assign_geometry_point(geom: &mut MxGeometry, point: MxPoint, in_points_array: bool) {
+    match point.as_attr.as_deref() {
+        Some("sourcePoint") => geom.source_point = Some(point),
+        Some("targetPoint") => geom.target_point = Some(point),
+        Some("offset") => geom.offset_point = Some(point),
+        _ => {
+            if in_points_array {
+                geom.points.push(point);
+            }
+        }
+    }
+}
+
+fn attr_is(e: &BytesStart<'_>, key: &str, expected: &str) -> ParseResult<bool> {
+    for a in e.attributes() {
+        let a = a?;
+        if a.key.as_ref() != key.as_bytes() {
+            continue;
+        }
+        return Ok(a.unescape_value()?.as_ref() == expected);
+    }
+    Ok(false)
 }
 
 fn attrs_to_map(e: &BytesStart<'_>) -> ParseResult<BTreeMap<String, String>> {
