@@ -821,7 +821,7 @@ fn unescape_html(input: &str) -> String {
                 "amp" => out.push('&'),
                 "quot" => out.push('"'),
                 "#39" => out.push('\''),
-                "nbsp" => out.push(' '),
+                "nbsp" => out.push('\u{00A0}'),
                 _ => {
                     out.push('&');
                     out.push_str(&entity);
