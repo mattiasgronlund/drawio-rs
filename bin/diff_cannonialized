@@ -1,0 +1,10 @@
+#!/bin/env bash
+set -e
+if [ $# != 1 ]; then
+    cd "$WORKSPACE_FOLDER/fixtures/corpus"
+    echo "Usage: $0 <fixture-name>"
+    find . -name \*.drawio
+    exit
+fi
+cd "${WORKSPACE_FOLDER}/target/canonicalized-svg/handpicked"
+difft --color always "$1"-*/actual.svg "$1"-*/expected.svg | less -R

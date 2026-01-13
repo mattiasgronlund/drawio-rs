@@ -119,7 +119,7 @@ fn ignored_fixtures() -> HashSet<String> {
 }
 
 fn is_update_enabled() -> bool {
-    match env::var("UPDATE_FIXTURES") {
+    match env::var("UPDATE_EXPECTED") {
         Ok(v) => !v.trim().is_empty() && v != "0" && v.to_lowercase() != "false",
         Err(_) => false,
     }
@@ -198,7 +198,7 @@ fn parser_dump_matches_expected_json() {
                 continue;
             } else {
                 failures.push(format!(
-                    "Missing expected JSON for {}\nExpected at: {}\nRun with UPDATE_FIXTURES=1 to generate.",
+                    "Missing expected JSON for {}\nExpected at: {}\nRun with UPDATE_EXPECTED=1 to generate.",
                     path.display(),
                     expected_path.display()
                 ));
@@ -226,7 +226,7 @@ fn parser_dump_matches_expected_json() {
 
             let d = diff_strings(&expected_pretty, &actual_pretty);
             failures.push(format!(
-                "Mismatch for fixture: {}\nExpected: {}\n{}\nTip: set UPDATE_FIXTURES=1 to update fixtures.",
+                "Mismatch for fixture: {}\nExpected: {}\n{}\nTip: set UPDATE_EXPECTED=1 to update fixtures.",
                 path.display(),
                 expected_path.display(),
                 d

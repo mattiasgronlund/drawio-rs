@@ -20,7 +20,7 @@ RUN mkdir -p /etc/zsh && \
     '[ -z "$WS" ] && WS="$(pwd 2>/dev/null)"' \
     '[ -f "$WS/.devcontainer/zshrc.workspace" ] && source "$WS/.devcontainer/zshrc.workspace"' \
     'HISTFILE="$WS/.devcontainer/.zsh_history"' \
-    'PATH="$HOME/.npm-global/bin:$PATH"' \
+    'PATH="$HOME/.npm-global/bin:$PATH:$WS/bin"' \
     'autoload -Uz compinit && compinit' \
     'eval "$(codex completion zsh)"' \
     >> /etc/zsh/zshenv

@@ -1,0 +1,33 @@
+#!/bin/env bash
+set -e
+if [ $# != 1 ]; then
+    cd "$WORKSPACE_FOLDER/fixtures/corpus/handpicked"
+    echo "Usage: $0 <fixture-prefix>"
+    echo
+    echo "Current test prefixes:"
+    printf "%q " $(find . -name \*.drawio -printf "%f\n" | cut -d- -f1 | sort -n)
+    echo
+    exit
+fi
+pushd  "${WORKSPACE_FOLDER}/fixtures/corpus/handpicked" >/dev/null
+filename="${1}"*.drawio
+popd >/dev/null
+bin/drawio --export --output fixtures/raw/handpicked/${filename%.*}.svg --format svg fixtures/corpus/handpicked/${filename}
+rm -f fixtures/expected/handpicked/${filename%.*}.svg
+cd "${WORKSPACE_FOLDER}"
+
+UPDATE_EXPECTED=1 cargo test -p drawio-core --test parser_dump parser_dump_matches_expected_json  >/dev/null 2>&1 || echo update_expected failed
+UPDATE_EXPECTED=1 cargo test -p drawio-core --test svg_dump svg_dump_matches_expected_svg  >/dev/null 2>&1 || echo update_expected failed
+rm -rf target/canonicalized-svg
+
+KEEP_CANNONICALIZED_SVG=1 cargo test -p drawio-core --test svg_dump svg_dump_matches_expected_svg  >/dev/null 2>&1 || echo keep_cannonicalized failed
+if [ -d target/canonicalized-svg/handpicked/"${1}"-* ]; then
+    diff_cannonialized "${1}"
+else
+    echo "updated:"
+    ls -l fixtures/raw/handpicked/${filename%.*}.svg
+    ls -l fixtures/expected/handpicked/${filename%.*}.svg
+    ls -l target/canonicalized-svg/handpicked
+fi
+
+

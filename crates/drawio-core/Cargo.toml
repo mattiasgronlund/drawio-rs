@@ -12,6 +12,9 @@ base64 = "0.22"
 flate2 = "1"
 percent-encoding = "2"
 
+[features]
+edge-debug = []
+
 [dev-dependencies]
 walkdir = "2"
 similar = "2"

@@ -1,4 +1,6 @@
-use crate::model::{Diagram, MxCell, MxFile, MxPoint};
+use crate::model::{Diagram, MxCell, MxFile, MxGeometry, MxPoint};
+#[cfg(feature = "edge-debug")]
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -157,10 +159,11 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
             .geometry
             .as_ref()
             .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
-        let x = geometry.x.unwrap_or(0.0) - min_x;
-        let y = geometry.y.unwrap_or(0.0) - min_y;
         let width = geometry.width.unwrap_or(0.0);
         let height = geometry.height.unwrap_or(0.0);
+        let top_left = vertex_top_left(cell, &cell_by_id)?;
+        let x = top_left.x - min_x;
+        let y = top_left.y - min_y;
         let style = cell.style.as_deref();
         let dash_attr = if is_dashed(style) {
             " stroke-dasharray=\"3 3\""
@@ -176,7 +179,42 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
             Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
             None => ("<g>".to_string(), "</g>".to_string()),
         };
-        if is_ellipse(style) {
+        if style_value(style, "shape") == Some("message") {
+            let (edge_stroke, edge_style_attr) = edge_stroke_attrs(style);
+            write!(
+                out,
+                "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} /><path d=\"M {} {} L {} {} L {} {}\" fill=\"none\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
+                cell.id,
+                open,
+                fmt_num(x),
+                fmt_num(y),
+                fmt_num(x + width),
+                fmt_num(y),
+                fmt_num(x + width),
+                fmt_num(y + height),
+                fmt_num(x),
+                fmt_num(y + height),
+                fill_attr,
+                stroke_attr,
+                dash_attr,
+                stroke_width_attr,
+                style_attr,
+                rotation_attr,
+                fmt_num(x),
+                fmt_num(y),
+                fmt_num(x + width / 2.0),
+                fmt_num(y + height / 2.0),
+                fmt_num(x + width),
+                fmt_num(y),
+                edge_stroke,
+                dash_attr,
+                stroke_width_attr,
+                edge_style_attr,
+                rotation_attr,
+                close
+            )
+            .unwrap();
+        } else if is_ellipse(style) {
             write!(
                 out,
                 "<g data-cell-id=\"{}\">{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
@@ -255,8 +293,9 @@ fn bounds_for_graph(
             .geometry
             .as_ref()
             .ok_or_else(|| SvgError::MissingGeometry(vertex.id.clone()))?;
-        let x = geometry.x.unwrap_or(0.0);
-        let y = geometry.y.unwrap_or(0.0);
+        let top_left = vertex_top_left(vertex, cell_by_id)?;
+        let x = top_left.x;
+        let y = top_left.y;
         let width = geometry.width.unwrap_or(0.0);
         let height = geometry.height.unwrap_or(0.0);
         let stroke_width = stroke_width_value(vertex.style.as_deref());
@@ -289,6 +328,81 @@ fn bounds_for_graph(
                 min_y = min_y.min(point.y);
                 max_x = max_x.max(point.x);
                 max_y = max_y.max(point.y);
+            }
+            let style = edge.style.as_deref();
+            let shape = style_value(style, "shape");
+            if shape == Some("flexArrow") {
+                let metrics = flex_arrow_metrics();
+                let centerline = flex_arrow_centerline(edge, &edge_path);
+                for point in &centerline {
+                    min_x = min_x.min(point.x - metrics.head_half);
+                    min_y = min_y.min(point.y - metrics.head_half);
+                    max_x = max_x.max(point.x + metrics.head_half);
+                    max_y = max_y.max(point.y + metrics.head_half);
+                }
+                let start_head = match style_value(style, "startArrow") {
+                    Some("none") | Some("0") => false,
+                    Some(_) => true,
+                    None => false,
+                };
+                let end_head = !matches!(style_value(style, "endArrow"), Some("none") | Some("0"));
+                if end_head
+                    && let Some((tip, left, right)) =
+                        flex_arrow_head_points(&centerline, true, metrics)
+                {
+                    for point in [tip, left, right] {
+                        min_x = min_x.min(point.x);
+                        min_y = min_y.min(point.y);
+                        max_x = max_x.max(point.x);
+                        max_y = max_y.max(point.y);
+                    }
+                }
+                if start_head
+                    && let Some((tip, left, right)) =
+                        flex_arrow_head_points(&centerline, false, metrics)
+                {
+                    for point in [tip, left, right] {
+                        min_x = min_x.min(point.x);
+                        min_y = min_y.min(point.y);
+                        max_x = max_x.max(point.x);
+                        max_y = max_y.max(point.y);
+                    }
+                }
+            }
+            if !matches!(shape, Some("arrow" | "link" | "flexArrow")) {
+                let stroke_width = stroke_width_value(style);
+                let metrics = edge_arrow_metrics(stroke_width);
+                let start_kind = marker_kind_from_value(style_value(style, "startArrow"));
+                let end_kind = match style_value(style, "endArrow") {
+                    Some("none") => None,
+                    Some(value) => marker_kind_from_value(Some(value)),
+                    None => Some(MarkerKind::Classic),
+                };
+                if start_kind.is_some() {
+                    expand_marker_bounds(
+                        &mut min_x,
+                        &mut min_y,
+                        &mut max_x,
+                        &mut max_y,
+                        edge_path.source_anchor,
+                        edge_path.start_dir,
+                        metrics,
+                    );
+                }
+                if end_kind.is_some() {
+                    expand_marker_bounds(
+                        &mut min_x,
+                        &mut min_y,
+                        &mut max_x,
+                        &mut max_y,
+                        edge_path.target_anchor,
+                        Point {
+                            x: -edge_path.end_dir.x,
+                            y: -edge_path.end_dir.y,
+                        },
+                        metrics,
+                    );
+                }
             }
         }
     }
@@ -333,13 +447,170 @@ struct EdgePath {
     full_points: Vec<Point>,
     line_points: Vec<Point>,
     arrow_points: Vec<Point>,
-    arrow_tip_gap: f64,
+    start_offset: f64,
+    end_offset: f64,
+    source_anchor: Point,
+    target_anchor: Point,
+    start_dir: Point,
+    end_dir: Point,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugOutlineCorner {
+    pub index: usize,
+    pub point: (f64, f64),
+    pub prev: (f64, f64),
+    pub next: (f64, f64),
+    pub cross: f64,
+    pub concave: bool,
+    pub skip: bool,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugEdgeGeometry {
+    pub shape: Option<String>,
+    pub edge_style: Option<String>,
+    pub source_anchor: (f64, f64),
+    pub target_anchor: (f64, f64),
+    pub start_dir: (f64, f64),
+    pub end_dir: (f64, f64),
+    pub line_points: Vec<(f64, f64)>,
+    pub full_points: Vec<(f64, f64)>,
+    pub flex_centerline: Option<Vec<(f64, f64)>>,
+    pub flex_outline: Option<Vec<(f64, f64)>>,
+    pub flex_outline_skip: Option<Vec<bool>>,
+    pub flex_outline_corners: Option<Vec<DebugOutlineCorner>>,
+    pub flex_round_indices: Option<Vec<usize>>,
 }
 
 struct EdgeRender {
     line: String,
     arrow: String,
     labels: Vec<String>,
+}
+
+struct EdgeLineSegment {
+    d: String,
+    fill: Option<&'static str>,
+    linejoin: Option<&'static str>,
+    miterlimit: Option<&'static str>,
+    pointer_events: &'static str,
+}
+
+#[cfg(feature = "edge-debug")]
+pub fn debug_edge_geometry(
+    edge: &MxCell,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+) -> SvgResult<Option<DebugEdgeGeometry>> {
+    let Some(edge_path) = edge_path_absolute(edge, cell_by_id)? else {
+        return Ok(None);
+    };
+    let style = edge.style.as_deref();
+    let shape = style_value(style, "shape").map(|value| value.to_string());
+    let edge_style = style_value(style, "edgeStyle").map(|value| value.to_string());
+    let line_points = edge_path
+        .line_points
+        .iter()
+        .map(|point| (point.x, point.y))
+        .collect();
+    let full_points = edge_path
+        .full_points
+        .iter()
+        .map(|point| (point.x, point.y))
+        .collect();
+
+    let mut flex_centerline = None;
+    let mut flex_outline = None;
+    let mut flex_outline_skip = None;
+    let mut flex_outline_corners = None;
+    let mut flex_round_indices = None;
+    if shape.as_deref() == Some("flexArrow") {
+        let centerline = flex_arrow_centerline(edge, &edge_path);
+        flex_centerline = Some(centerline.iter().map(|point| (point.x, point.y)).collect());
+        let start_head = match style_value(style, "startArrow") {
+            Some("none") | Some("0") => false,
+            Some(_) => true,
+            None => false,
+        };
+        let end_head = !matches!(style_value(style, "endArrow"), Some("none") | Some("0"));
+        let metrics = flex_arrow_metrics();
+        let use_orthogonal_offsets = style_value(style, "edgeStyle") == Some("orthogonalEdgeStyle");
+        let include_end_head_points = true;
+        let (outline, skip_round) = flex_arrow_outline(
+            &centerline,
+            start_head,
+            end_head,
+            include_end_head_points,
+            metrics,
+            use_orthogonal_offsets,
+        );
+        if !outline.is_empty() {
+            flex_outline = Some(outline.iter().map(|point| (point.x, point.y)).collect());
+            flex_outline_skip = Some(skip_round.clone());
+            flex_outline_corners = Some(debug_outline_corners(&outline, &skip_round));
+            if use_orthogonal_offsets {
+                flex_round_indices = Some(orthogonal_flex_round_indices(
+                    &centerline,
+                    &outline,
+                    metrics.body_half,
+                ));
+            }
+        }
+    }
+
+    Ok(Some(DebugEdgeGeometry {
+        shape,
+        edge_style,
+        source_anchor: (edge_path.source_anchor.x, edge_path.source_anchor.y),
+        target_anchor: (edge_path.target_anchor.x, edge_path.target_anchor.y),
+        start_dir: (edge_path.start_dir.x, edge_path.start_dir.y),
+        end_dir: (edge_path.end_dir.x, edge_path.end_dir.y),
+        line_points,
+        full_points,
+        flex_centerline,
+        flex_outline,
+        flex_outline_skip,
+        flex_outline_corners,
+        flex_round_indices,
+    }))
+}
+
+#[cfg(feature = "edge-debug")]
+fn debug_outline_corners(points: &[Point], skip_round: &[bool]) -> Vec<DebugOutlineCorner> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let area = polygon_area(points);
+    let orientation = if area.abs() <= f64::EPSILON {
+        1.0
+    } else if area > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let count = points.len();
+    let mut corners = Vec::with_capacity(count);
+    for idx in 0..count {
+        let prev = points[(idx + count - 1) % count];
+        let corner = points[idx];
+        let next = points[(idx + 1) % count];
+        let cross =
+            (corner.x - prev.x) * (next.y - corner.y) - (corner.y - prev.y) * (next.x - corner.x);
+        let concave = cross * orientation < 0.0;
+        let skip = skip_round.get(idx).copied().unwrap_or(false);
+        corners.push(DebugOutlineCorner {
+            index: idx,
+            point: (corner.x, corner.y),
+            prev: (prev.x, prev.y),
+            next: (next.x, next.y),
+            cross,
+            concave,
+            skip,
+        });
+    }
+    corners
 }
 
 fn render_edge(
@@ -353,59 +624,55 @@ fn render_edge(
         return Ok(None);
     };
     let style = edge.style.as_deref();
-    let dash_attr = if is_dashed(style) {
-        " stroke-dasharray=\"3 3\""
-    } else {
-        ""
-    };
+    let dash_attr = dash_pattern_attr(style);
     let stroke_width_attr = stroke_width_attr(style);
+    let (stroke_attr, stroke_style_attr) = edge_stroke_attrs(style);
 
     let mut line = String::new();
-    line.push_str("<path d=\"");
-    for (idx, point) in edge_path.line_points.iter().enumerate() {
-        let x = point.x - min_x;
-        let y = point.y - min_y;
-        if idx == 0 {
-            write!(line, "M {} {}", fmt_num(x), fmt_num(y)).unwrap();
-        } else {
-            write!(line, " L {} {}", fmt_num(x), fmt_num(y)).unwrap();
-        }
-    }
-    write!(
-        line,
-        "\" fill=\"none\" stroke=\"#000000\" stroke-miterlimit=\"10\" pointer-events=\"stroke\"{}{} style=\"stroke: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));\"/>",
-        dash_attr,
-        stroke_width_attr
-    )
-    .unwrap();
-
-    let arrow = if edge_path.arrow_points.is_empty() {
-        String::new()
-    } else {
-        let tip = edge_path.arrow_points[0];
-        let left = edge_path.arrow_points[1];
-        let base = edge_path.arrow_points[2];
-        let right = edge_path.arrow_points[3];
-        format!(
-            "<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"#000000\" stroke=\"#000000\" stroke-miterlimit=\"10\" pointer-events=\"all\"{} style=\"fill: light-dark(rgb(0, 0, 0), rgb(255, 255, 255)); stroke: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));\"/>",
-            fmt_num(tip.x - min_x),
-            fmt_num(tip.y - min_y),
-            fmt_num(left.x - min_x),
-            fmt_num(left.y - min_y),
-            fmt_num(base.x - min_x),
-            fmt_num(base.y - min_y),
-            fmt_num(right.x - min_x),
-            fmt_num(right.y - min_y),
-            stroke_width_attr
+    for segment in edge_line_paths(edge, &edge_path, min_x, min_y) {
+        let linejoin = segment
+            .linejoin
+            .map(|value| format!(" stroke-linejoin=\"{value}\""))
+            .unwrap_or_default();
+        let miterlimit = segment
+            .miterlimit
+            .map(|value| format!(" stroke-miterlimit=\"{value}\""))
+            .unwrap_or_else(|| " stroke-miterlimit=\"10\"".to_string());
+        let fill = segment.fill.unwrap_or("none");
+        write!(
+            line,
+            "<path d=\"{}\" fill=\"{}\" stroke=\"{}\"{} pointer-events=\"{}\"{}{}{}{} />",
+            segment.d,
+            fill,
+            stroke_attr,
+            miterlimit,
+            segment.pointer_events,
+            dash_attr,
+            stroke_width_attr,
+            stroke_style_attr,
+            linejoin
         )
-    };
+        .unwrap();
+    }
+
+    let arrow = render_edge_markers(
+        edge,
+        &edge_path,
+        min_x,
+        min_y,
+        &stroke_attr,
+        &stroke_style_attr,
+        &stroke_width_attr,
+    );
 
     let mut labels = Vec::new();
     if let Some(value_label) = render_edge_value_label(edge, &edge_path, min_x, min_y) {
         labels.push(value_label);
     }
     for label in label_cells {
-        if let Some(label) = render_edge_label_cell(label, &edge_path, min_x, min_y) {
+        if let Some(label) =
+            render_edge_label_cell(edge, label, cell_by_id, &edge_path, min_x, min_y)
+        {
             labels.push(label);
         }
     }
@@ -415,6 +682,134 @@ fn render_edge(
         arrow,
         labels,
     }))
+}
+
+fn edge_line_paths(
+    edge: &MxCell,
+    edge_path: &EdgePath,
+    min_x: f64,
+    min_y: f64,
+) -> Vec<EdgeLineSegment> {
+    let style = edge.style.as_deref();
+    if style_value(style, "shape") == Some("flexArrow") {
+        return flex_arrow_paths(edge, edge_path, min_x, min_y);
+    }
+    if style_value(style, "shape") == Some("arrow")
+        && let Some(segment) = arrow_shape_path(edge_path, min_x, min_y)
+    {
+        return vec![segment];
+    }
+    if style_value(style, "shape") == Some("link")
+        && let Some(segment) = link_shape_path(edge_path, min_x, min_y)
+    {
+        return vec![segment];
+    }
+    if style_value(style, "curved") == Some("1") {
+        return vec![curved_edge_path(edge_path, min_x, min_y)];
+    }
+    if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
+        return vec![entity_relation_path(edge_path, min_x, min_y)];
+    }
+    if style_value(style, "rounded") != Some("0") && edge_path.line_points.len() > 2 {
+        return vec![rounded_edge_path(edge_path, min_x, min_y)];
+    }
+
+    let mut d = String::new();
+    for (idx, point) in edge_path.line_points.iter().enumerate() {
+        let x = point.x - min_x;
+        let y = point.y - min_y;
+        if idx == 0 {
+            write!(d, "M {} {}", fmt_num(x), fmt_num(y)).unwrap();
+        } else {
+            write!(d, " L {} {}", fmt_num(x), fmt_num(y)).unwrap();
+        }
+    }
+    vec![EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "stroke",
+    }]
+}
+
+fn flex_arrow_paths(
+    edge: &MxCell,
+    edge_path: &EdgePath,
+    min_x: f64,
+    min_y: f64,
+) -> Vec<EdgeLineSegment> {
+    let style = edge.style.as_deref();
+    let points = flex_arrow_centerline(edge, edge_path);
+    if points.len() < 2 {
+        return Vec::new();
+    }
+    let start_head = match style_value(style, "startArrow") {
+        Some("none") | Some("0") => false,
+        Some(_) => true,
+        None => false,
+    };
+    let end_head = !matches!(style_value(style, "endArrow"), Some("none") | Some("0"));
+    let metrics = flex_arrow_metrics();
+    let use_orthogonal_offsets = style_value(style, "edgeStyle") == Some("orthogonalEdgeStyle");
+    let rounded = style_value(style, "edgeStyle") == Some("orthogonalEdgeStyle")
+        || style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle");
+    let include_end_head_points = true;
+    let (outline, _round_skip) = flex_arrow_outline(
+        &points,
+        start_head,
+        end_head,
+        include_end_head_points,
+        metrics,
+        use_orthogonal_offsets,
+    );
+    if outline.is_empty() {
+        return Vec::new();
+    }
+    let main = if rounded && outline.len() > 2 {
+        if style_value(style, "edgeStyle") == Some("orthogonalEdgeStyle") {
+            let adjusted = adjust_outline_min_x(&outline, 0.5);
+            let round_indices =
+                orthogonal_flex_round_indices(&points, &adjusted, metrics.body_half);
+            rounded_polygon_path_indices(
+                &adjusted,
+                &round_indices,
+                metrics.corner_radius,
+                min_x,
+                min_y,
+            )
+        } else {
+            rounded_polygon_path(&outline, metrics.corner_radius, min_x, min_y)
+        }
+    } else {
+        polygon_path(&outline, min_x, min_y)
+    };
+    let mut out = vec![EdgeLineSegment {
+        d: main,
+        fill: None,
+        linejoin: Some("round"),
+        miterlimit: Some("10"),
+        pointer_events: "all",
+    }];
+    if rounded
+        && end_head
+        && let Some(head) = flex_arrow_head_path(
+            points.last().copied().unwrap(),
+            points[points.len() - 2],
+            metrics,
+            min_x,
+            min_y,
+        )
+    {
+        out.push(EdgeLineSegment {
+            d: head,
+            fill: None,
+            linejoin: Some("flat"),
+            miterlimit: Some("4"),
+            pointer_events: "all",
+        });
+    }
+    out
 }
 
 fn edge_path_absolute(
@@ -427,10 +822,14 @@ fn edge_path_absolute(
     let mut target_point = None;
 
     if let Some(geom) = geometry {
-        if let Some(point) = geom.source_point.as_ref().and_then(point_from_mxpoint) {
+        if edge.source.is_none()
+            && let Some(point) = geom.source_point.as_ref().and_then(point_from_mxpoint)
+        {
             source_point = Some(point);
         }
-        if let Some(point) = geom.target_point.as_ref().and_then(point_from_mxpoint) {
+        if edge.target.is_none()
+            && let Some(point) = geom.target_point.as_ref().and_then(point_from_mxpoint)
+        {
             target_point = Some(point);
         }
         for point in &geom.points {
@@ -456,51 +855,108 @@ fn edge_path_absolute(
     if source_point.is_none()
         && let Some(source_cell) = source
     {
-        let source_center = cell_center(source_cell)?;
-        let target_dir = if let Some(first) = control_points.first() {
-            Point {
-                x: first.x - source_center.x,
-                y: first.y - source_center.y,
-            }
-        } else if let Some(target_cell) = target {
-            let target_center = cell_center(target_cell)?;
-            Point {
-                x: target_center.x - source_center.x,
-                y: target_center.y - source_center.y,
-            }
+        if let Some(point) = terminal_point_override(edge.style.as_deref(), source_cell, true)? {
+            source_point = Some(point);
         } else {
-            Point { x: 1.0, y: 0.0 }
-        };
-        let spacing = perimeter_spacing(source_cell.style.as_deref());
-        source_point = Some(terminal_point_for_cell(source_cell, target_dir, spacing)?);
+            let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
+                == Some("orthogonalEdgeStyle")
+                && !is_ellipse(source_cell.style.as_deref());
+            let source_center = cell_center(source_cell)?;
+            let target_dir = if let Some(first) = control_points.first() {
+                Point {
+                    x: first.x - source_center.x,
+                    y: first.y - source_center.y,
+                }
+            } else if let Some(target_cell) = target {
+                let target_center = cell_center(target_cell)?;
+                Point {
+                    x: target_center.x - source_center.x,
+                    y: target_center.y - source_center.y,
+                }
+            } else {
+                Point { x: 1.0, y: 0.0 }
+            };
+            let spacing = perimeter_spacing(source_cell.style.as_deref());
+            source_point = Some(if use_orthogonal_terminal {
+                orthogonal_terminal_point_for_cell(source_cell, target_dir, spacing)?
+            } else {
+                terminal_point_for_cell(source_cell, target_dir, spacing)?
+            });
+        }
     }
 
     if target_point.is_none()
         && let Some(target_cell) = target
     {
-        let target_center = cell_center(target_cell)?;
-        let source_dir = if let Some(last) = control_points.last() {
-            Point {
-                x: last.x - target_center.x,
-                y: last.y - target_center.y,
-            }
-        } else if let Some(source_cell) = source {
-            let source_center = cell_center(source_cell)?;
-            Point {
-                x: source_center.x - target_center.x,
-                y: source_center.y - target_center.y,
-            }
+        if let Some(point) = terminal_point_override(edge.style.as_deref(), target_cell, false)? {
+            target_point = Some(point);
         } else {
-            Point { x: -1.0, y: 0.0 }
-        };
-        target_point = Some(terminal_point_for_cell(target_cell, source_dir, 0.0)?);
+            let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
+                == Some("orthogonalEdgeStyle")
+                && !is_ellipse(target_cell.style.as_deref());
+            let target_center = cell_center(target_cell)?;
+            let source_dir = if let Some(last) = control_points.last() {
+                Point {
+                    x: last.x - target_center.x,
+                    y: last.y - target_center.y,
+                }
+            } else if let Some(source_cell) = source {
+                let source_center = cell_center(source_cell)?;
+                Point {
+                    x: source_center.x - target_center.x,
+                    y: source_center.y - target_center.y,
+                }
+            } else {
+                Point { x: -1.0, y: 0.0 }
+            };
+            target_point = Some(if use_orthogonal_terminal {
+                orthogonal_terminal_point_for_cell(target_cell, source_dir, 0.0)?
+            } else {
+                terminal_point_for_cell(target_cell, source_dir, 0.0)?
+            });
+        }
     }
 
-    let Some(start) = source_point else {
+    let Some(start_anchor) = source_point else {
         return Ok(None);
     };
-    let Some(end) = target_point else {
+    let Some(end_anchor) = target_point else {
         return Ok(None);
+    };
+
+    let style = edge.style.as_deref();
+    let (start_offset, end_offset) = marker_offsets(style, stroke_width_value(style));
+
+    let start_dir = if let Some(first) = control_points.first() {
+        normalize(Point {
+            x: first.x - start_anchor.x,
+            y: first.y - start_anchor.y,
+        })
+    } else {
+        normalize(Point {
+            x: end_anchor.x - start_anchor.x,
+            y: end_anchor.y - start_anchor.y,
+        })
+    };
+    let end_dir = if let Some(last) = control_points.last() {
+        normalize(Point {
+            x: end_anchor.x - last.x,
+            y: end_anchor.y - last.y,
+        })
+    } else {
+        normalize(Point {
+            x: end_anchor.x - start_anchor.x,
+            y: end_anchor.y - start_anchor.y,
+        })
+    };
+
+    let start = Point {
+        x: start_anchor.x + start_dir.x * start_offset,
+        y: start_anchor.y + start_dir.y * start_offset,
+    };
+    let end = Point {
+        x: end_anchor.x - end_dir.x * end_offset,
+        y: end_anchor.y - end_dir.y * end_offset,
     };
 
     let mut full_points = Vec::with_capacity(control_points.len() + 2);
@@ -508,57 +964,19 @@ fn edge_path_absolute(
     full_points.extend(control_points);
     full_points.push(end);
 
-    let style = edge.style.as_deref();
-    let has_arrow = end_arrow_enabled(style);
-    let arrow_tip_gap;
-    let (line_points, arrow_points) = if has_arrow && full_points.len() >= 2 {
-        let mut line_points = full_points.clone();
-        let last = line_points[line_points.len() - 1];
-        let prev = line_points[line_points.len() - 2];
-        let dir = normalize(Point {
-            x: last.x - prev.x,
-            y: last.y - prev.y,
-        });
-        let (tip_gap, arrow_length, arrow_back, arrow_half_height) =
-            edge_arrow_metrics(stroke_width_value(style));
-        arrow_tip_gap = tip_gap;
-        let tip = Point {
-            x: last.x - dir.x * tip_gap,
-            y: last.y - dir.y * tip_gap,
-        };
-        let base = Point {
-            x: tip.x - dir.x * arrow_length,
-            y: tip.y - dir.y * arrow_length,
-        };
-        let back = Point {
-            x: base.x - dir.x * arrow_back,
-            y: base.y - dir.y * arrow_back,
-        };
-        let perp = Point {
-            x: -dir.y,
-            y: dir.x,
-        };
-        let left = Point {
-            x: back.x + perp.x * arrow_half_height,
-            y: back.y + perp.y * arrow_half_height,
-        };
-        let right = Point {
-            x: back.x - perp.x * arrow_half_height,
-            y: back.y - perp.y * arrow_half_height,
-        };
-        *line_points.last_mut().unwrap() = base;
-        let arrow_points = vec![tip, left, base, right];
-        (line_points, arrow_points)
-    } else {
-        arrow_tip_gap = 0.0;
-        (full_points.clone(), Vec::new())
-    };
+    let line_points = full_points.clone();
+    let arrow_points = Vec::new();
 
     Ok(Some(EdgePath {
         full_points,
         line_points,
         arrow_points,
-        arrow_tip_gap,
+        start_offset,
+        end_offset,
+        source_anchor: start_anchor,
+        target_anchor: end_anchor,
+        start_dir,
+        end_dir,
     }))
 }
 
@@ -602,6 +1020,119 @@ fn terminal_point_for_cell(cell: &MxCell, direction: Point, spacing: f64) -> Svg
             center, half_w, half_h, rotation, direction,
         ))
     }
+}
+
+fn orthogonal_terminal_point_for_cell(
+    cell: &MxCell,
+    direction: Point,
+    spacing: f64,
+) -> SvgResult<Point> {
+    let geometry = cell
+        .geometry
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
+    let x = geometry.x.unwrap_or(0.0);
+    let y = geometry.y.unwrap_or(0.0);
+    let width = geometry.width.unwrap_or(0.0);
+    let height = geometry.height.unwrap_or(0.0);
+    let center = Point {
+        x: x + width / 2.0,
+        y: y + height / 2.0,
+    };
+    let (mut point, rotation) = if direction.x.abs() >= direction.y.abs() {
+        if direction.x >= 0.0 {
+            (
+                Point {
+                    x: x + width + spacing,
+                    y: y + height / 2.0,
+                },
+                rotation_degrees(cell.style.as_deref()),
+            )
+        } else {
+            (
+                Point {
+                    x: x - spacing,
+                    y: y + height / 2.0,
+                },
+                rotation_degrees(cell.style.as_deref()),
+            )
+        }
+    } else if direction.y >= 0.0 {
+        (
+            Point {
+                x: x + width / 2.0,
+                y: y + height + spacing,
+            },
+            rotation_degrees(cell.style.as_deref()),
+        )
+    } else {
+        (
+            Point {
+                x: x + width / 2.0,
+                y: y - spacing,
+            },
+            rotation_degrees(cell.style.as_deref()),
+        )
+    };
+    if rotation.abs() > f64::EPSILON {
+        let angle = rotation.to_radians();
+        let dx = point.x - center.x;
+        let dy = point.y - center.y;
+        point = Point {
+            x: center.x + dx * angle.cos() - dy * angle.sin(),
+            y: center.y + dx * angle.sin() + dy * angle.cos(),
+        };
+    }
+    Ok(point)
+}
+
+fn terminal_point_override(
+    edge_style: Option<&str>,
+    cell: &MxCell,
+    is_source: bool,
+) -> SvgResult<Option<Point>> {
+    let geometry = cell
+        .geometry
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
+    let rel_x = if is_source {
+        style_value(edge_style, "exitX")
+    } else {
+        style_value(edge_style, "entryX")
+    }
+    .and_then(|value| value.parse::<f64>().ok());
+    let rel_y = if is_source {
+        style_value(edge_style, "exitY")
+    } else {
+        style_value(edge_style, "entryY")
+    }
+    .and_then(|value| value.parse::<f64>().ok());
+    let (Some(rel_x), Some(rel_y)) = (rel_x, rel_y) else {
+        return Ok(None);
+    };
+    let x = geometry.x.unwrap_or(0.0);
+    let y = geometry.y.unwrap_or(0.0);
+    let width = geometry.width.unwrap_or(0.0);
+    let height = geometry.height.unwrap_or(0.0);
+    let rotation = rotation_degrees(cell.style.as_deref());
+    let center = Point {
+        x: x + width / 2.0,
+        y: y + height / 2.0,
+    };
+    let mut point = Point {
+        x: x + rel_x * width,
+        y: y + rel_y * height,
+    };
+    if rotation.abs() > f64::EPSILON {
+        let angle = rotation.to_radians();
+        let dx = point.x - center.x;
+        let dy = point.y - center.y;
+        point = Point {
+            x: center.x + dx * angle.cos() - dy * angle.sin(),
+            y: center.y + dx * angle.sin() + dy * angle.cos(),
+        };
+    }
+    Ok(Some(point))
 }
 
 fn point_from_mxpoint(point: &MxPoint) -> Option<Point> {
@@ -676,6 +1207,1468 @@ fn normalize(point: Point) -> Point {
             y: point.y / len,
         }
     }
+}
+
+fn dash_pattern_attr(style: Option<&str>) -> String {
+    if let Some(pattern) = style_value(style, "dashPattern") {
+        return format!(" stroke-dasharray=\"{pattern}\"");
+    }
+    if is_dashed(style) {
+        return " stroke-dasharray=\"3 3\"".to_string();
+    }
+    String::new()
+}
+
+fn edge_stroke_attrs(style: Option<&str>) -> (String, String) {
+    let stroke_color = style_value(style, "strokeColor");
+    let stroke = match stroke_color {
+        Some("none") => "none".to_string(),
+        Some(value) => normalize_color_value(value),
+        None => "#000000".to_string(),
+    };
+    let mut style_parts: Vec<String> = Vec::new();
+    if stroke_color.is_none() {
+        style_parts.push("stroke: light-dark(rgb(0, 0, 0), rgb(255, 255, 255));".to_string());
+    } else if let Some(value) = stroke_color
+        && let Some(pair) = light_dark_pair(value)
+    {
+        style_parts.push(format!(
+            "stroke: {};",
+            format_light_dark_style(&pair.light, &pair.dark)
+        ));
+    }
+    let style_attr = if style_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", style_parts.join(" "))
+    };
+    (stroke, style_attr)
+}
+
+fn curved_edge_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLineSegment {
+    let mut points = edge_path.full_points.clone();
+    if let (Some(last), Some(end)) = (points.last_mut(), edge_path.line_points.last()) {
+        *last = *end;
+    }
+    let mut d = String::new();
+    if let Some(first) = points.first() {
+        write!(
+            d,
+            "M {} {}",
+            fmt_num(first.x - min_x),
+            fmt_num(first.y - min_y)
+        )
+        .unwrap();
+    }
+    if points.len() >= 3 {
+        for window in points[1..points.len() - 1].windows(2) {
+            let control = window[0];
+            let end = Point {
+                x: (window[0].x + window[1].x) / 2.0,
+                y: (window[0].y + window[1].y) / 2.0,
+            };
+            write!(
+                d,
+                " Q {} {} {} {}",
+                fmt_num(control.x - min_x),
+                fmt_num(control.y - min_y),
+                fmt_num(end.x - min_x),
+                fmt_num(end.y - min_y)
+            )
+            .unwrap();
+        }
+        let control = points[points.len() - 2];
+        let last = points[points.len() - 1];
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(control.x - min_x),
+            fmt_num(control.y - min_y),
+            fmt_num(last.x - min_x),
+            fmt_num(last.y - min_y)
+        )
+        .unwrap();
+    }
+    EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "stroke",
+    }
+}
+
+fn rounded_edge_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLineSegment {
+    let radius: f64 = 10.0;
+    let points = &edge_path.line_points;
+    let mut d = String::new();
+    if points.len() < 2 {
+        return EdgeLineSegment {
+            d,
+            fill: None,
+            linejoin: None,
+            miterlimit: None,
+            pointer_events: "stroke",
+        };
+    }
+    let first = points[0];
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(first.x - min_x),
+        fmt_num(first.y - min_y)
+    )
+    .unwrap();
+    if points.len() == 2 {
+        let last = points[1];
+        write!(
+            d,
+            " L {} {}",
+            fmt_num(last.x - min_x),
+            fmt_num(last.y - min_y)
+        )
+        .unwrap();
+        return EdgeLineSegment {
+            d,
+            fill: None,
+            linejoin: None,
+            miterlimit: None,
+            pointer_events: "stroke",
+        };
+    }
+    let mut current = first;
+    for window in points.windows(3) {
+        let prev = window[0];
+        let corner = window[1];
+        let next = window[2];
+        let in_vec = Point {
+            x: prev.x - corner.x,
+            y: prev.y - corner.y,
+        };
+        let out_vec = Point {
+            x: next.x - corner.x,
+            y: next.y - corner.y,
+        };
+        let in_len = (in_vec.x * in_vec.x + in_vec.y * in_vec.y).sqrt();
+        let out_len = (out_vec.x * out_vec.x + out_vec.y * out_vec.y).sqrt();
+        if in_len <= f64::EPSILON || out_len <= f64::EPSILON {
+            continue;
+        }
+        let r = radius.min(in_len / 2.0).min(out_len / 2.0);
+        if r <= f64::EPSILON {
+            if (current.x - corner.x).abs() > f64::EPSILON
+                || (current.y - corner.y).abs() > f64::EPSILON
+            {
+                write!(
+                    d,
+                    " L {} {}",
+                    fmt_num(corner.x - min_x),
+                    fmt_num(corner.y - min_y)
+                )
+                .unwrap();
+                current = corner;
+            }
+            continue;
+        }
+        let in_unit = Point {
+            x: in_vec.x / in_len,
+            y: in_vec.y / in_len,
+        };
+        let out_unit = Point {
+            x: out_vec.x / out_len,
+            y: out_vec.y / out_len,
+        };
+        let pre = Point {
+            x: corner.x + in_unit.x * r,
+            y: corner.y + in_unit.y * r,
+        };
+        let post = Point {
+            x: corner.x + out_unit.x * r,
+            y: corner.y + out_unit.y * r,
+        };
+        if (current.x - pre.x).abs() > f64::EPSILON || (current.y - pre.y).abs() > f64::EPSILON {
+            write!(
+                d,
+                " L {} {}",
+                fmt_num(pre.x - min_x),
+                fmt_num(pre.y - min_y)
+            )
+            .unwrap();
+        }
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(corner.x - min_x),
+            fmt_num(corner.y - min_y),
+            fmt_num(post.x - min_x),
+            fmt_num(post.y - min_y)
+        )
+        .unwrap();
+        current = post;
+    }
+    let last = points[points.len() - 1];
+    write!(
+        d,
+        " L {} {}",
+        fmt_num(last.x - min_x),
+        fmt_num(last.y - min_y)
+    )
+    .unwrap();
+    EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "stroke",
+    }
+}
+
+fn entity_relation_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLineSegment {
+    let segment = 20.0;
+    let curve_ratio = 0.9745;
+    let curve_y_ratio = 0.316;
+    let start = edge_path
+        .line_points
+        .first()
+        .copied()
+        .unwrap_or(edge_path.source_anchor);
+    let end = edge_path
+        .line_points
+        .last()
+        .copied()
+        .unwrap_or(edge_path.target_anchor);
+    let dir = edge_path.start_dir;
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let source_segment = Point {
+        x: edge_path.source_anchor.x + dir.x * segment,
+        y: edge_path.source_anchor.y + dir.y * segment,
+    };
+    let target_segment = Point {
+        x: edge_path.target_anchor.x - dir.x * segment,
+        y: edge_path.target_anchor.y - dir.y * segment,
+    };
+    let dy = target_segment.y - source_segment.y;
+    let curve_x = segment * curve_ratio;
+    let curve_y = dy * curve_y_ratio;
+    let control_in = Point {
+        x: source_segment.x + dir.x * (segment / 2.0),
+        y: source_segment.y + dir.y * (segment / 2.0),
+    };
+    let control_out = Point {
+        x: target_segment.x - dir.x * (segment / 2.0),
+        y: target_segment.y - dir.y * (segment / 2.0),
+    };
+    let curve_start = Point {
+        x: source_segment.x + dir.x * curve_x + perp.x * curve_y,
+        y: source_segment.y + dir.y * curve_x + perp.y * curve_y,
+    };
+    let curve_end = Point {
+        x: target_segment.x - dir.x * curve_x + perp.x * curve_y,
+        y: target_segment.y - dir.y * curve_x + perp.y * curve_y,
+    };
+    let mut d = String::new();
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(start.x - min_x),
+        fmt_num(start.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " L {} {}",
+        fmt_num(source_segment.x - min_x),
+        fmt_num(source_segment.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " Q {} {} {} {}",
+        fmt_num(control_in.x - min_x),
+        fmt_num(control_in.y - min_y),
+        fmt_num(curve_start.x - min_x),
+        fmt_num(curve_start.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " L {} {}",
+        fmt_num(curve_end.x - min_x),
+        fmt_num(curve_end.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " Q {} {} {} {}",
+        fmt_num(control_out.x - min_x),
+        fmt_num(control_out.y - min_y),
+        fmt_num(target_segment.x - min_x),
+        fmt_num(target_segment.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " L {} {}",
+        fmt_num(end.x - min_x),
+        fmt_num(end.y - min_y)
+    )
+    .unwrap();
+    EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "stroke",
+    }
+}
+
+fn arrow_shape_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> Option<EdgeLineSegment> {
+    let start = edge_path.source_anchor;
+    let end = edge_path.target_anchor;
+    let dir = normalize(Point {
+        x: end.x - start.x,
+        y: end.y - start.y,
+    });
+    if dir.x == 0.0 && dir.y == 0.0 {
+        return None;
+    }
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let body_half = 5.0;
+    let head_half = 15.0;
+    let head_length = 30.0;
+    let body_end = Point {
+        x: end.x - dir.x * head_length,
+        y: end.y - dir.y * head_length,
+    };
+    let points = [
+        Point {
+            x: start.x + perp.x * body_half,
+            y: start.y + perp.y * body_half,
+        },
+        Point {
+            x: start.x - perp.x * body_half,
+            y: start.y - perp.y * body_half,
+        },
+        Point {
+            x: body_end.x - perp.x * body_half,
+            y: body_end.y - perp.y * body_half,
+        },
+        Point {
+            x: body_end.x - perp.x * head_half,
+            y: body_end.y - perp.y * head_half,
+        },
+        end,
+        Point {
+            x: body_end.x + perp.x * head_half,
+            y: body_end.y + perp.y * head_half,
+        },
+        Point {
+            x: body_end.x + perp.x * body_half,
+            y: body_end.y + perp.y * body_half,
+        },
+    ];
+    let mut d = String::new();
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(points[0].x - min_x),
+        fmt_num(points[0].y - min_y)
+    )
+    .unwrap();
+    for point in &points[1..] {
+        write!(
+            d,
+            " L {} {}",
+            fmt_num(point.x - min_x),
+            fmt_num(point.y - min_y)
+        )
+        .unwrap();
+    }
+    d.push_str(" Z");
+    Some(EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "all",
+    })
+}
+
+#[derive(Clone, Copy)]
+struct FlexArrowMetrics {
+    body_half: f64,
+    head_half: f64,
+    head_length: f64,
+    tip_gap: f64,
+    corner_radius: f64,
+}
+
+fn flex_arrow_metrics() -> FlexArrowMetrics {
+    FlexArrowMetrics {
+        body_half: 5.0,
+        head_half: 15.5,
+        head_length: 19.5,
+        tip_gap: 0.5,
+        corner_radius: 10.0,
+    }
+}
+
+fn flex_arrow_centerline(edge: &MxCell, edge_path: &EdgePath) -> Vec<Point> {
+    if edge_path.line_points.len() > 2 {
+        return edge_path.line_points.clone();
+    }
+    let source = edge_path.source_anchor;
+    let target = edge_path.target_anchor;
+    let style = edge.style.as_deref();
+    match style_value(style, "edgeStyle") {
+        Some("orthogonalEdgeStyle") => orthogonal_centerline(source, target),
+        Some("isometricEdgeStyle") => {
+            let elbow = style_value(style, "elbow");
+            isometric_centerline(source, target, elbow)
+        }
+        Some("entityRelationEdgeStyle") => entity_relation_points(edge_path),
+        _ => vec![source, target],
+    }
+}
+
+fn orthogonal_centerline(source: Point, target: Point) -> Vec<Point> {
+    let dx = (target.x - source.x).abs();
+    let dy = (target.y - source.y).abs();
+    if dx < f64::EPSILON || dy < f64::EPSILON {
+        return vec![source, target];
+    }
+    if dx >= dy {
+        let mid_x = (source.x + target.x) / 2.0;
+        vec![
+            source,
+            Point {
+                x: mid_x,
+                y: source.y,
+            },
+            Point {
+                x: mid_x,
+                y: target.y,
+            },
+            target,
+        ]
+    } else {
+        let mid_y = (source.y + target.y) / 2.0;
+        vec![
+            source,
+            Point {
+                x: source.x,
+                y: mid_y,
+            },
+            Point {
+                x: target.x,
+                y: mid_y,
+            },
+            target,
+        ]
+    }
+}
+
+fn isometric_centerline(source: Point, target: Point, elbow: Option<&str>) -> Vec<Point> {
+    let sqrt3 = 3.0_f64.sqrt();
+    let (u1, v1) = (source.x + source.y * sqrt3, source.x - source.y * sqrt3);
+    let (u2, v2) = (target.x + target.y * sqrt3, target.x - target.y * sqrt3);
+    let use_mid_u = matches!(elbow, Some("vertical"));
+    if use_mid_u {
+        let mid_u = (u1 + u2) / 2.0;
+        let a = Point {
+            x: (mid_u + v1) / 2.0,
+            y: (mid_u - v1) / (2.0 * sqrt3),
+        };
+        let b = Point {
+            x: (mid_u + v2) / 2.0,
+            y: (mid_u - v2) / (2.0 * sqrt3),
+        };
+        vec![source, a, b, target]
+    } else {
+        let mid_v = (v1 + v2) / 2.0;
+        let a = Point {
+            x: (u1 + mid_v) / 2.0,
+            y: (u1 - mid_v) / (2.0 * sqrt3),
+        };
+        let b = Point {
+            x: (u2 + mid_v) / 2.0,
+            y: (u2 - mid_v) / (2.0 * sqrt3),
+        };
+        vec![source, a, b, target]
+    }
+}
+
+fn entity_relation_points(edge_path: &EdgePath) -> Vec<Point> {
+    let segment = 20.0;
+    let curve_ratio = 0.9745;
+    let curve_y_ratio = 0.316;
+    let start = edge_path
+        .line_points
+        .first()
+        .copied()
+        .unwrap_or(edge_path.source_anchor);
+    let end = edge_path
+        .line_points
+        .last()
+        .copied()
+        .unwrap_or(edge_path.target_anchor);
+    let dir = edge_path.start_dir;
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let source_segment = Point {
+        x: edge_path.source_anchor.x + dir.x * segment,
+        y: edge_path.source_anchor.y + dir.y * segment,
+    };
+    let target_segment = Point {
+        x: edge_path.target_anchor.x - dir.x * segment,
+        y: edge_path.target_anchor.y - dir.y * segment,
+    };
+    let dy = target_segment.y - source_segment.y;
+    let curve_x = segment * curve_ratio;
+    let curve_y = dy * curve_y_ratio;
+    let curve_start = Point {
+        x: source_segment.x + dir.x * curve_x + perp.x * curve_y,
+        y: source_segment.y + dir.y * curve_x + perp.y * curve_y,
+    };
+    let curve_end = Point {
+        x: target_segment.x - dir.x * curve_x + perp.x * curve_y,
+        y: target_segment.y - dir.y * curve_x + perp.y * curve_y,
+    };
+    vec![
+        start,
+        source_segment,
+        curve_start,
+        curve_end,
+        target_segment,
+        end,
+    ]
+}
+
+fn flex_arrow_outline(
+    centerline: &[Point],
+    start_head: bool,
+    end_head: bool,
+    include_end_head_points: bool,
+    metrics: FlexArrowMetrics,
+    use_orthogonal_offsets: bool,
+) -> (Vec<Point>, Vec<bool>) {
+    let mut points = centerline.to_vec();
+    if points.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    let start_trim = if start_head { metrics.head_length } else { 0.0 };
+    let end_trim = if end_head && include_end_head_points {
+        metrics.head_length
+    } else {
+        0.0
+    };
+    points = trim_polyline(&points, start_trim, end_trim);
+    if points.len() < 2 {
+        return (Vec::new(), Vec::new());
+    }
+    let (mut left, mut right) = if use_orthogonal_offsets {
+        offset_polyline_orthogonal_segmented(&points, metrics.body_half)
+            .unwrap_or_else(|| offset_polyline(&points, metrics.body_half))
+    } else {
+        offset_polyline(&points, metrics.body_half)
+    };
+    if left.is_empty() || right.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    if use_orthogonal_offsets {
+        std::mem::swap(&mut left, &mut right);
+    }
+    let mut outline = Vec::new();
+    let mut round_skip = Vec::new();
+    let push_point =
+        |point: Point, skip_round: bool, outline: &mut Vec<Point>, skip: &mut Vec<bool>| {
+            outline.push(point);
+            skip.push(skip_round);
+        };
+    if start_head {
+        push_point(left[0], false, &mut outline, &mut round_skip);
+        if let Some((tip, left_base, right_base)) =
+            flex_arrow_head_points(centerline, false, metrics)
+        {
+            push_point(right_base, true, &mut outline, &mut round_skip);
+            push_point(tip, true, &mut outline, &mut round_skip);
+            push_point(left_base, true, &mut outline, &mut round_skip);
+        }
+        for point in &right {
+            push_point(*point, false, &mut outline, &mut round_skip);
+        }
+        if end_head
+            && include_end_head_points
+            && let Some((tip, left_base, right_base)) =
+                flex_arrow_head_points(centerline, true, metrics)
+        {
+            push_point(left_base, true, &mut outline, &mut round_skip);
+            push_point(tip, true, &mut outline, &mut round_skip);
+            push_point(right_base, true, &mut outline, &mut round_skip);
+        }
+        for point in left.iter().rev().take(left.len().saturating_sub(1)) {
+            push_point(*point, false, &mut outline, &mut round_skip);
+        }
+    } else {
+        for point in &left {
+            push_point(*point, false, &mut outline, &mut round_skip);
+        }
+        let mut skip_first_right = false;
+        if end_head
+            && include_end_head_points
+            && let Some((tip, left_base, right_base)) =
+                flex_arrow_head_points(centerline, true, metrics)
+        {
+            if let Some(last) = round_skip.last_mut() {
+                *last = true;
+            }
+            push_point(left_base, true, &mut outline, &mut round_skip);
+            push_point(tip, true, &mut outline, &mut round_skip);
+            push_point(right_base, true, &mut outline, &mut round_skip);
+            skip_first_right = true;
+        }
+        for (idx, point) in right.into_iter().rev().enumerate() {
+            let skip = skip_first_right && idx == 0;
+            push_point(point, skip, &mut outline, &mut round_skip);
+        }
+    }
+    if use_orthogonal_offsets && outline.len() > 2 {
+        let find_start = |points: &[Point]| -> (usize, bool) {
+            let min_x = points
+                .iter()
+                .fold(f64::INFINITY, |acc, point| acc.min(point.x));
+            let mut fallback_idx = 0;
+            let mut vertical_idx = None;
+            for idx in 0..points.len() {
+                let current = points[idx];
+                if (current.x - min_x).abs() > 1e-6 {
+                    continue;
+                }
+                let next = points[(idx + 1) % points.len()];
+                if (next.x - current.x).abs() <= 1e-6 {
+                    if next.y < current.y - 1e-6 {
+                        return (idx, true);
+                    }
+                    if vertical_idx.is_none() {
+                        vertical_idx = Some(idx);
+                    }
+                } else if vertical_idx.is_none() {
+                    let best = points[fallback_idx];
+                    if current.y > best.y + 1e-6 {
+                        fallback_idx = idx;
+                    }
+                }
+            }
+            (vertical_idx.unwrap_or(fallback_idx), false)
+        };
+
+        let (mut start_idx, found_upward) = find_start(&outline);
+        if !found_upward {
+            outline.reverse();
+            round_skip.reverse();
+            let (rev_idx, _) = find_start(&outline);
+            start_idx = rev_idx;
+        }
+        if start_idx != 0 {
+            let mut rotated = Vec::with_capacity(outline.len());
+            let mut rotated_skip = Vec::with_capacity(round_skip.len());
+            for offset in 0..outline.len() {
+                let idx = (start_idx + offset) % outline.len();
+                rotated.push(outline[idx]);
+                rotated_skip.push(round_skip[idx]);
+            }
+            outline = rotated;
+            round_skip = rotated_skip;
+        }
+    }
+    (outline, round_skip)
+}
+
+fn flex_arrow_head_points(
+    centerline: &[Point],
+    at_end: bool,
+    metrics: FlexArrowMetrics,
+) -> Option<(Point, Point, Point)> {
+    if centerline.len() < 2 {
+        return None;
+    }
+    let (tip, base, dir) = if at_end {
+        let end = *centerline.last()?;
+        let prev = centerline[centerline.len() - 2];
+        let dir = normalize(Point {
+            x: end.x - prev.x,
+            y: end.y - prev.y,
+        });
+        let tip = Point {
+            x: end.x - dir.x * metrics.tip_gap,
+            y: end.y - dir.y * metrics.tip_gap,
+        };
+        let base = Point {
+            x: end.x - dir.x * metrics.head_length,
+            y: end.y - dir.y * metrics.head_length,
+        };
+        (tip, base, dir)
+    } else {
+        let start = centerline[0];
+        let next = centerline[1];
+        let dir = normalize(Point {
+            x: next.x - start.x,
+            y: next.y - start.y,
+        });
+        let tip = Point {
+            x: start.x + dir.x * metrics.tip_gap,
+            y: start.y + dir.y * metrics.tip_gap,
+        };
+        let base = Point {
+            x: start.x + dir.x * metrics.head_length,
+            y: start.y + dir.y * metrics.head_length,
+        };
+        (tip, base, dir)
+    };
+    let perp = Point {
+        x: dir.y,
+        y: -dir.x,
+    };
+    let left_base = Point {
+        x: base.x + perp.x * metrics.head_half,
+        y: base.y + perp.y * metrics.head_half,
+    };
+    let right_base = Point {
+        x: base.x - perp.x * metrics.head_half,
+        y: base.y - perp.y * metrics.head_half,
+    };
+    Some((tip, left_base, right_base))
+}
+
+fn flex_arrow_head_path(
+    end: Point,
+    prev: Point,
+    metrics: FlexArrowMetrics,
+    min_x: f64,
+    min_y: f64,
+) -> Option<String> {
+    let dir = normalize(Point {
+        x: end.x - prev.x,
+        y: end.y - prev.y,
+    });
+    let tip = Point {
+        x: end.x - dir.x * metrics.tip_gap,
+        y: end.y - dir.y * metrics.tip_gap,
+    };
+    let base = Point {
+        x: end.x - dir.x * metrics.head_length,
+        y: end.y - dir.y * metrics.head_length,
+    };
+    let perp = Point {
+        x: dir.y,
+        y: -dir.x,
+    };
+    let start = Point {
+        x: base.x + perp.x * metrics.body_half,
+        y: base.y + perp.y * metrics.body_half,
+    };
+    let left = Point {
+        x: base.x + perp.x * metrics.head_half,
+        y: base.y + perp.y * metrics.head_half,
+    };
+    let right = Point {
+        x: base.x - perp.x * metrics.head_half,
+        y: base.y - perp.y * metrics.head_half,
+    };
+    let end = Point {
+        x: base.x - perp.x * metrics.body_half,
+        y: base.y - perp.y * metrics.body_half,
+    };
+    let mut d = String::new();
+    write!(
+        d,
+        "M {} {} L {} {} L {} {} L {} {} L {} {}",
+        fmt_num(start.x - min_x),
+        fmt_num(start.y - min_y),
+        fmt_num(left.x - min_x),
+        fmt_num(left.y - min_y),
+        fmt_num(tip.x - min_x),
+        fmt_num(tip.y - min_y),
+        fmt_num(right.x - min_x),
+        fmt_num(right.y - min_y),
+        fmt_num(end.x - min_x),
+        fmt_num(end.y - min_y)
+    )
+    .unwrap();
+    Some(d)
+}
+
+fn trim_polyline(points: &[Point], start_trim: f64, end_trim: f64) -> Vec<Point> {
+    if points.len() < 2 {
+        return points.to_vec();
+    }
+    let mut out = points.to_vec();
+    if start_trim > 0.0 {
+        out = trim_polyline_from_start(&out, start_trim);
+    }
+    if end_trim > 0.0 {
+        out = trim_polyline_from_end(&out, end_trim);
+    }
+    out
+}
+
+fn trim_polyline_from_start(points: &[Point], mut trim: f64) -> Vec<Point> {
+    let mut out = Vec::new();
+    let mut idx = 0;
+    while idx + 1 < points.len() {
+        let a = points[idx];
+        let b = points[idx + 1];
+        let seg_len = distance(a, b);
+        if seg_len <= f64::EPSILON {
+            idx += 1;
+            continue;
+        }
+        if trim < seg_len {
+            let t = trim / seg_len;
+            out.push(Point {
+                x: a.x + (b.x - a.x) * t,
+                y: a.y + (b.y - a.y) * t,
+            });
+            out.extend_from_slice(&points[idx + 1..]);
+            return out;
+        }
+        trim -= seg_len;
+        idx += 1;
+    }
+    vec![*points.last().unwrap()]
+}
+
+fn trim_polyline_from_end(points: &[Point], mut trim: f64) -> Vec<Point> {
+    let mut out = Vec::new();
+    let mut idx = points.len() - 1;
+    while idx > 0 {
+        let a = points[idx];
+        let b = points[idx - 1];
+        let seg_len = distance(a, b);
+        if seg_len <= f64::EPSILON {
+            idx -= 1;
+            continue;
+        }
+        if trim < seg_len {
+            let t = trim / seg_len;
+            let point = Point {
+                x: a.x + (b.x - a.x) * t,
+                y: a.y + (b.y - a.y) * t,
+            };
+            out.extend_from_slice(&points[..idx]);
+            out.push(point);
+            return out;
+        }
+        trim -= seg_len;
+        idx -= 1;
+    }
+    vec![points[0]]
+}
+
+fn offset_polyline(points: &[Point], half: f64) -> (Vec<Point>, Vec<Point>) {
+    let mut left = Vec::with_capacity(points.len());
+    let mut right = Vec::with_capacity(points.len());
+    for (idx, point) in points.iter().enumerate() {
+        let (dir_prev, dir_next) = if idx == 0 {
+            let dir = normalize(Point {
+                x: points[1].x - point.x,
+                y: points[1].y - point.y,
+            });
+            (dir, dir)
+        } else if idx + 1 == points.len() {
+            let dir = normalize(Point {
+                x: point.x - points[idx - 1].x,
+                y: point.y - points[idx - 1].y,
+            });
+            (dir, dir)
+        } else {
+            (
+                normalize(Point {
+                    x: point.x - points[idx - 1].x,
+                    y: point.y - points[idx - 1].y,
+                }),
+                normalize(Point {
+                    x: points[idx + 1].x - point.x,
+                    y: points[idx + 1].y - point.y,
+                }),
+            )
+        };
+        let perp_prev = Point {
+            x: -dir_prev.y,
+            y: dir_prev.x,
+        };
+        let perp_next = Point {
+            x: -dir_next.y,
+            y: dir_next.x,
+        };
+        let mut miter = Point {
+            x: perp_prev.x + perp_next.x,
+            y: perp_prev.y + perp_next.y,
+        };
+        if miter.x.abs() < f64::EPSILON && miter.y.abs() < f64::EPSILON {
+            miter = perp_prev;
+        }
+        let miter = normalize(miter);
+        let denom = miter.x * perp_prev.x + miter.y * perp_prev.y;
+        let mut miter_len = if denom.abs() > f64::EPSILON {
+            half / denom
+        } else {
+            half
+        };
+        let max_miter = half * 4.0;
+        if miter_len.abs() > max_miter {
+            miter_len = max_miter * miter_len.signum();
+        }
+        left.push(Point {
+            x: point.x + miter.x * miter_len,
+            y: point.y + miter.y * miter_len,
+        });
+        right.push(Point {
+            x: point.x - miter.x * miter_len,
+            y: point.y - miter.y * miter_len,
+        });
+    }
+    (left, right)
+}
+
+fn offset_polyline_orthogonal_segmented(
+    points: &[Point],
+    half: f64,
+) -> Option<(Vec<Point>, Vec<Point>)> {
+    const ORTHO_EPS: f64 = 1e-6;
+    if points.len() < 2 {
+        return None;
+    }
+    let mut dirs: Vec<Point> = Vec::with_capacity(points.len() - 1);
+    for pair in points.windows(2) {
+        let dx = pair[1].x - pair[0].x;
+        let dy = pair[1].y - pair[0].y;
+        if dx.abs() > ORTHO_EPS && dy.abs() > ORTHO_EPS {
+            return None;
+        }
+        dirs.push(orthogonal_dir(pair[0], pair[1]));
+    }
+    if dirs
+        .iter()
+        .all(|dir| dir.x.abs() <= ORTHO_EPS && dir.y.abs() <= ORTHO_EPS)
+    {
+        return None;
+    }
+
+    let mut left = Vec::with_capacity(points.len());
+    let mut right = Vec::with_capacity(points.len());
+
+    let first_dir = dirs[0];
+    let first_perp = Point {
+        x: -first_dir.y,
+        y: first_dir.x,
+    };
+    left.push(Point {
+        x: points[0].x + first_perp.x * half,
+        y: points[0].y + first_perp.y * half,
+    });
+    right.push(Point {
+        x: points[0].x - first_perp.x * half,
+        y: points[0].y - first_perp.y * half,
+    });
+
+    for idx in 1..points.len() - 1 {
+        let prev_dir = dirs[idx - 1];
+        let next_dir = dirs[idx];
+        let prev_perp = Point {
+            x: -prev_dir.y,
+            y: prev_dir.x,
+        };
+        let next_perp = Point {
+            x: -next_dir.y,
+            y: next_dir.x,
+        };
+        let prev_left = Point {
+            x: points[idx].x + prev_perp.x * half,
+            y: points[idx].y + prev_perp.y * half,
+        };
+        let next_left = Point {
+            x: points[idx].x + next_perp.x * half,
+            y: points[idx].y + next_perp.y * half,
+        };
+        let prev_right = Point {
+            x: points[idx].x - prev_perp.x * half,
+            y: points[idx].y - prev_perp.y * half,
+        };
+        let next_right = Point {
+            x: points[idx].x - next_perp.x * half,
+            y: points[idx].y - next_perp.y * half,
+        };
+        let left_corner = if prev_dir.x.abs() > ORTHO_EPS && next_dir.y.abs() > ORTHO_EPS {
+            Point {
+                x: next_left.x,
+                y: prev_left.y,
+            }
+        } else if prev_dir.y.abs() > ORTHO_EPS && next_dir.x.abs() > ORTHO_EPS {
+            Point {
+                x: prev_left.x,
+                y: next_left.y,
+            }
+        } else {
+            next_left
+        };
+        let right_corner = if prev_dir.x.abs() > ORTHO_EPS && next_dir.y.abs() > ORTHO_EPS {
+            Point {
+                x: next_right.x,
+                y: prev_right.y,
+            }
+        } else if prev_dir.y.abs() > ORTHO_EPS && next_dir.x.abs() > ORTHO_EPS {
+            Point {
+                x: prev_right.x,
+                y: next_right.y,
+            }
+        } else {
+            next_right
+        };
+        left.push(left_corner);
+        right.push(right_corner);
+    }
+
+    let last_dir = *dirs.last().unwrap();
+    let last_perp = Point {
+        x: -last_dir.y,
+        y: last_dir.x,
+    };
+    left.push(Point {
+        x: points[points.len() - 1].x + last_perp.x * half,
+        y: points[points.len() - 1].y + last_perp.y * half,
+    });
+    right.push(Point {
+        x: points[points.len() - 1].x - last_perp.x * half,
+        y: points[points.len() - 1].y - last_perp.y * half,
+    });
+
+    Some((left, right))
+}
+
+fn orthogonal_dir(a: Point, b: Point) -> Point {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    if dx.abs() > dy.abs() {
+        Point {
+            x: dx.signum(),
+            y: 0.0,
+        }
+    } else {
+        Point {
+            x: 0.0,
+            y: dy.signum(),
+        }
+    }
+}
+
+fn polygon_path(points: &[Point], min_x: f64, min_y: f64) -> String {
+    let mut d = String::new();
+    if points.is_empty() {
+        return d;
+    }
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(points[0].x - min_x),
+        fmt_num(points[0].y - min_y)
+    )
+    .unwrap();
+    for point in &points[1..] {
+        write!(
+            d,
+            " L {} {}",
+            fmt_num(point.x - min_x),
+            fmt_num(point.y - min_y)
+        )
+        .unwrap();
+    }
+    d.push_str(" Z");
+    d
+}
+
+fn orthogonal_flex_round_indices(centerline: &[Point], outline: &[Point], half: f64) -> Vec<usize> {
+    if centerline.len() < 3 || outline.is_empty() {
+        return Vec::new();
+    }
+    let mut corners = Vec::new();
+    for idx in 1..centerline.len() - 1 {
+        let dir1 = orthogonal_dir(centerline[idx - 1], centerline[idx]);
+        let dir2 = orthogonal_dir(centerline[idx], centerline[idx + 1]);
+        let cross = dir1.x * dir2.y - dir1.y * dir2.x;
+        if cross.abs() <= f64::EPSILON {
+            continue;
+        }
+        let (n1, n2) = if cross > 0.0 {
+            (right_normal(dir1), right_normal(dir2))
+        } else {
+            (left_normal(dir1), left_normal(dir2))
+        };
+        let corner = Point {
+            x: centerline[idx].x + (n1.x + n2.x) * half,
+            y: centerline[idx].y + (n1.y + n2.y) * half,
+        };
+        corners.push(corner);
+    }
+
+    let mut indices = Vec::new();
+    for corner in corners {
+        if let Some(idx) = find_outline_index(outline, corner, 1e-3)
+            && !indices.contains(&idx)
+        {
+            indices.push(idx);
+        }
+    }
+    indices.sort_unstable();
+    indices
+}
+
+fn find_outline_index(points: &[Point], target: Point, eps: f64) -> Option<usize> {
+    let mut best = None;
+    let mut best_dist = f64::INFINITY;
+    for (idx, point) in points.iter().enumerate() {
+        let dx = point.x - target.x;
+        let dy = point.y - target.y;
+        let dist = dx * dx + dy * dy;
+        if dist < best_dist {
+            best_dist = dist;
+            best = Some(idx);
+        }
+    }
+    if best_dist <= eps * eps { best } else { None }
+}
+
+fn right_normal(dir: Point) -> Point {
+    Point {
+        x: dir.y,
+        y: -dir.x,
+    }
+}
+
+fn left_normal(dir: Point) -> Point {
+    Point {
+        x: -dir.y,
+        y: dir.x,
+    }
+}
+
+fn adjust_outline_min_x(points: &[Point], delta: f64) -> Vec<Point> {
+    if points.is_empty() {
+        return Vec::new();
+    }
+    let min_x = points
+        .iter()
+        .fold(f64::INFINITY, |acc, point| acc.min(point.x));
+    let mut out = Vec::with_capacity(points.len());
+    for point in points {
+        let mut adjusted = *point;
+        if (point.x - min_x).abs() <= 1e-6 {
+            adjusted.x += delta;
+        }
+        out.push(adjusted);
+    }
+    out
+}
+
+#[cfg(feature = "edge-debug")]
+fn polygon_area(points: &[Point]) -> f64 {
+    if points.len() < 3 {
+        return 0.0;
+    }
+    let mut area = 0.0;
+    for idx in 0..points.len() {
+        let current = points[idx];
+        let next = points[(idx + 1) % points.len()];
+        area += current.x * next.y - next.x * current.y;
+    }
+    area * 0.5
+}
+
+fn rounded_polygon_path_indices(
+    points: &[Point],
+    round_indices: &[usize],
+    radius: f64,
+    min_x: f64,
+    min_y: f64,
+) -> String {
+    if points.len() < 3 || radius <= f64::EPSILON {
+        return polygon_path(points, min_x, min_y);
+    }
+    let mut d = String::new();
+    let mut current = points[0];
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(current.x - min_x),
+        fmt_num(current.y - min_y)
+    )
+    .unwrap();
+    let count = points.len();
+    for idx in 0..count {
+        let prev = points[(idx + count - 1) % count];
+        let corner = points[idx];
+        let next = points[(idx + 1) % count];
+        let in_vec = Point {
+            x: prev.x - corner.x,
+            y: prev.y - corner.y,
+        };
+        let out_vec = Point {
+            x: next.x - corner.x,
+            y: next.y - corner.y,
+        };
+        let in_len = (in_vec.x * in_vec.x + in_vec.y * in_vec.y).sqrt();
+        let out_len = (out_vec.x * out_vec.x + out_vec.y * out_vec.y).sqrt();
+        if in_len <= f64::EPSILON || out_len <= f64::EPSILON {
+            continue;
+        }
+        if !round_indices.contains(&idx) {
+            if (current.x - corner.x).abs() > f64::EPSILON
+                || (current.y - corner.y).abs() > f64::EPSILON
+            {
+                write!(
+                    d,
+                    " L {} {}",
+                    fmt_num(corner.x - min_x),
+                    fmt_num(corner.y - min_y)
+                )
+                .unwrap();
+                current = corner;
+            }
+            continue;
+        }
+        let r = radius.min(in_len / 2.0).min(out_len / 2.0);
+        if r <= f64::EPSILON {
+            if (current.x - corner.x).abs() > f64::EPSILON
+                || (current.y - corner.y).abs() > f64::EPSILON
+            {
+                write!(
+                    d,
+                    " L {} {}",
+                    fmt_num(corner.x - min_x),
+                    fmt_num(corner.y - min_y)
+                )
+                .unwrap();
+                current = corner;
+            }
+            continue;
+        }
+        let in_unit = Point {
+            x: in_vec.x / in_len,
+            y: in_vec.y / in_len,
+        };
+        let out_unit = Point {
+            x: out_vec.x / out_len,
+            y: out_vec.y / out_len,
+        };
+        let pre = Point {
+            x: corner.x + in_unit.x * r,
+            y: corner.y + in_unit.y * r,
+        };
+        let post = Point {
+            x: corner.x + out_unit.x * r,
+            y: corner.y + out_unit.y * r,
+        };
+        if (current.x - pre.x).abs() > f64::EPSILON || (current.y - pre.y).abs() > f64::EPSILON {
+            write!(
+                d,
+                " L {} {}",
+                fmt_num(pre.x - min_x),
+                fmt_num(pre.y - min_y)
+            )
+            .unwrap();
+        }
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(corner.x - min_x),
+            fmt_num(corner.y - min_y),
+            fmt_num(post.x - min_x),
+            fmt_num(post.y - min_y)
+        )
+        .unwrap();
+        current = post;
+    }
+    d.push_str(" Z");
+    d
+}
+
+fn rounded_polygon_path(points: &[Point], radius: f64, min_x: f64, min_y: f64) -> String {
+    if points.len() < 3 || radius <= f64::EPSILON {
+        return polygon_path(points, min_x, min_y);
+    }
+    let mut d = String::new();
+    let mut pts = points.to_vec();
+    pts.push(points[0]);
+    pts.push(points[1]);
+    let start = pts[0];
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(start.x - min_x),
+        fmt_num(start.y - min_y)
+    )
+    .unwrap();
+    let mut current = start;
+    for window in pts.windows(3) {
+        let prev = window[0];
+        let corner = window[1];
+        let next = window[2];
+        let in_vec = Point {
+            x: prev.x - corner.x,
+            y: prev.y - corner.y,
+        };
+        let out_vec = Point {
+            x: next.x - corner.x,
+            y: next.y - corner.y,
+        };
+        let in_len = (in_vec.x * in_vec.x + in_vec.y * in_vec.y).sqrt();
+        let out_len = (out_vec.x * out_vec.x + out_vec.y * out_vec.y).sqrt();
+        if in_len <= f64::EPSILON || out_len <= f64::EPSILON {
+            continue;
+        }
+        let r = radius.min(in_len / 2.0).min(out_len / 2.0);
+        if r <= f64::EPSILON {
+            continue;
+        }
+        let in_unit = Point {
+            x: in_vec.x / in_len,
+            y: in_vec.y / in_len,
+        };
+        let out_unit = Point {
+            x: out_vec.x / out_len,
+            y: out_vec.y / out_len,
+        };
+        let pre = Point {
+            x: corner.x + in_unit.x * r,
+            y: corner.y + in_unit.y * r,
+        };
+        let post = Point {
+            x: corner.x + out_unit.x * r,
+            y: corner.y + out_unit.y * r,
+        };
+        if (current.x - pre.x).abs() > f64::EPSILON || (current.y - pre.y).abs() > f64::EPSILON {
+            write!(
+                d,
+                " L {} {}",
+                fmt_num(pre.x - min_x),
+                fmt_num(pre.y - min_y)
+            )
+            .unwrap();
+        }
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(corner.x - min_x),
+            fmt_num(corner.y - min_y),
+            fmt_num(post.x - min_x),
+            fmt_num(post.y - min_y)
+        )
+        .unwrap();
+        current = post;
+    }
+    d.push_str(" Z");
+    d
+}
+
+fn link_shape_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> Option<EdgeLineSegment> {
+    let start = edge_path.source_anchor;
+    let end = edge_path.target_anchor;
+    let dir = normalize(Point {
+        x: end.x - start.x,
+        y: end.y - start.y,
+    });
+    if dir.x == 0.0 && dir.y == 0.0 {
+        return None;
+    }
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let offset = 2.0;
+    let start_neg = Point {
+        x: start.x - perp.x * offset,
+        y: start.y - perp.y * offset,
+    };
+    let end_neg = Point {
+        x: end.x - perp.x * offset,
+        y: end.y - perp.y * offset,
+    };
+    let start_pos = Point {
+        x: start.x + perp.x * offset,
+        y: start.y + perp.y * offset,
+    };
+    let end_pos = Point {
+        x: end.x + perp.x * offset,
+        y: end.y + perp.y * offset,
+    };
+    let mut d = String::new();
+    write!(
+        d,
+        "M {} {} L {} {} M {} {} L {} {} M {} {}",
+        fmt_num(start_neg.x - min_x),
+        fmt_num(start_neg.y - min_y),
+        fmt_num(end_neg.x - min_x),
+        fmt_num(end_neg.y - min_y),
+        fmt_num(end_pos.x - min_x),
+        fmt_num(end_pos.y - min_y),
+        fmt_num(start_pos.x - min_x),
+        fmt_num(start_pos.y - min_y),
+        fmt_num(end_pos.x - min_x),
+        fmt_num(end_pos.y - min_y)
+    )
+    .unwrap();
+    Some(EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: Some("round"),
+        miterlimit: None,
+        pointer_events: "all",
+    })
+}
+
+fn vertex_top_left(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> SvgResult<Point> {
+    let geometry = cell
+        .geometry
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
+    let width = geometry.width.unwrap_or(0.0);
+    let height = geometry.height.unwrap_or(0.0);
+    if geometry.relative == Some(true)
+        && let Some(parent_id) = cell.parent.as_ref()
+        && let Some(parent) = cell_by_id.get(parent_id)
+        && parent.edge == Some(true)
+        && let Some(edge_path) = edge_path_absolute(parent, cell_by_id)?
+    {
+        let rotation = rotation_degrees(cell.style.as_deref());
+        if let Some(center) =
+            edge_label_position(parent, &edge_path, cell_by_id, geometry, rotation)
+        {
+            let offset = geometry
+                .offset_point
+                .as_ref()
+                .and_then(point_from_mxpoint)
+                .unwrap_or(Point {
+                    x: -width / 2.0,
+                    y: -height / 2.0,
+                });
+            return Ok(Point {
+                x: center.x + offset.x,
+                y: center.y + offset.y,
+            });
+        }
+    }
+    Ok(Point {
+        x: geometry.x.unwrap_or(0.0),
+        y: geometry.y.unwrap_or(0.0),
+    })
 }
 
 fn rect_intersection(center: Point, half_w: f64, half_h: f64, rotation: f64, dir: Point) -> Point {
@@ -819,12 +2812,21 @@ fn render_edge_value_label(
     if value.is_empty() {
         return None;
     }
-    let (center, _) = point_along_polyline(&edge_path.full_points, 0.5)?;
+    let mut label_points = edge_path.full_points.clone();
+    if let Some(first) = label_points.first_mut() {
+        *first = edge_path.source_anchor;
+    }
+    if let Some(last) = label_points.last_mut() {
+        *last = edge_path.target_anchor;
+    }
+    let (center, _) = point_along_polyline(&label_points, 0.5)?;
     render_edge_label_at(edge, center.x - min_x, center.y - min_y, None)
 }
 
 fn render_edge_label_cell(
+    edge: &MxCell,
     label: &MxCell,
+    cell_by_id: &BTreeMap<String, &MxCell>,
     edge_path: &EdgePath,
     min_x: f64,
     min_y: f64,
@@ -833,29 +2835,65 @@ fn render_edge_label_cell(
     if value.is_empty() {
         return None;
     }
-    let (center, direction) = point_along_polyline(&edge_path.line_points, 0.5)?;
+    let rotation = rotation_degrees(label.style.as_deref());
     let geom = label.geometry.as_ref()?;
+    let position = edge_label_position(edge, edge_path, cell_by_id, geom, rotation)?;
+    let rendered = render_edge_label_at(
+        label,
+        position.x - min_x,
+        position.y - min_y,
+        Some(rotation),
+    )?;
+    Some(format!("<g data-cell-id=\"{}\">{}</g>", label.id, rendered))
+}
+
+fn edge_label_position(
+    edge: &MxCell,
+    edge_path: &EdgePath,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+    geom: &MxGeometry,
+    rotation: f64,
+) -> Option<Point> {
+    let (center, direction) = point_along_polyline(&edge_path.line_points, 0.5)?;
+    let line_length = polyline_length(&edge_path.line_points);
     let y_offset = geom.y.unwrap_or(0.0);
     let x_offset = geom.x.unwrap_or(0.0);
+    let has_rotation = rotation.abs() > f64::EPSILON;
     let is_vertical = direction.y.abs() >= direction.x.abs();
-    let mut parallel_offset = if is_vertical {
-        y_offset
-    } else {
-        edge_path.arrow_tip_gap
-    };
-    if is_vertical && x_offset != 0.0 {
-        let line_length = polyline_length(&edge_path.line_points);
-        // Geometry.x nudges edge labels along the segment; scale to match draw.io output.
-        parallel_offset += x_offset * line_length / 24.303900870352876;
-    }
-    // Edge label offsets behave differently on horizontal vs vertical edges; mirror
-    // draw.io's placement for the current fixture set.
+    // Draw.io rounds geometry.x-based offsets to whole pixels, then adds a
+    // +1px bias plus the midpoint shift caused by arrow trimming.
+    let round_offset = (x_offset * line_length / 2.0).round();
+    let base_parallel = 1.0 + (edge_path.end_offset - edge_path.start_offset) / 2.0;
+    let mut parallel_offset = base_parallel + round_offset;
     let perp_offset = if is_vertical {
-        y_offset
-    } else if y_offset < 0.0 {
-        -y_offset + 1.0
+        if has_rotation {
+            let max_terminal_rotation = edge
+                .source
+                .as_ref()
+                .and_then(|id| cell_by_id.get(id))
+                .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
+                .unwrap_or(0.0)
+                .max(
+                    edge.target
+                        .as_ref()
+                        .and_then(|id| cell_by_id.get(id))
+                        .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
+                        .unwrap_or(0.0),
+                );
+            let rotation_factor = (1.0 - max_terminal_rotation / 75.0
+                + max_terminal_rotation / 15000.0
+                + max_terminal_rotation / 12_989_318.0)
+                .clamp(0.0, 1.0);
+            parallel_offset -= (1.0 - rotation.to_radians().cos()) * rotation_factor;
+            y_offset
+        } else {
+            1.0 + y_offset
+        }
+    } else if has_rotation {
+        parallel_offset -= 1.0;
+        1.0 - y_offset - (1.0 - rotation.to_radians().cos())
     } else {
-        y_offset
+        1.0 - y_offset
     };
     let perp = if is_vertical {
         Point {
@@ -868,18 +2906,10 @@ fn render_edge_label_cell(
             y: direction.x,
         }
     };
-    let position = Point {
+    Some(Point {
         x: center.x + direction.x * parallel_offset + perp.x * perp_offset,
         y: center.y + direction.y * parallel_offset + perp.y * perp_offset,
-    };
-    let rotation = rotation_degrees(label.style.as_deref());
-    let rendered = render_edge_label_at(
-        label,
-        position.x - min_x,
-        position.y - min_y,
-        Some(rotation),
-    )?;
-    Some(format!("<g data-cell-id=\"{}\">{}</g>", label.id, rendered))
+    })
 }
 
 fn render_edge_label_at(
@@ -1018,8 +3048,889 @@ fn edge_arrow_metrics(stroke_width: f64) -> (f64, f64, f64, f64) {
     (1.12, 5.25, 1.75, 3.5)
 }
 
-fn end_arrow_enabled(style: Option<&str>) -> bool {
-    !matches!(style_value(style, "endArrow"), Some("none"))
+fn expand_marker_bounds(
+    min_x: &mut f64,
+    min_y: &mut f64,
+    max_x: &mut f64,
+    max_y: &mut f64,
+    anchor: Point,
+    dir: Point,
+    metrics: (f64, f64, f64, f64),
+) {
+    let (tip_gap, arrow_length, arrow_back, arrow_half_height) = metrics;
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let tip = Point {
+        x: anchor.x + dir.x * tip_gap,
+        y: anchor.y + dir.y * tip_gap,
+    };
+    let outer = Point {
+        x: anchor.x + dir.x * (tip_gap + arrow_length + arrow_back),
+        y: anchor.y + dir.y * (tip_gap + arrow_length + arrow_back),
+    };
+    let points = [
+        tip,
+        Point {
+            x: tip.x + perp.x * arrow_half_height,
+            y: tip.y + perp.y * arrow_half_height,
+        },
+        Point {
+            x: tip.x - perp.x * arrow_half_height,
+            y: tip.y - perp.y * arrow_half_height,
+        },
+        Point {
+            x: outer.x + perp.x * arrow_half_height,
+            y: outer.y + perp.y * arrow_half_height,
+        },
+        Point {
+            x: outer.x - perp.x * arrow_half_height,
+            y: outer.y - perp.y * arrow_half_height,
+        },
+    ];
+    for point in points {
+        *min_x = min_x.min(point.x);
+        *min_y = min_y.min(point.y);
+        *max_x = max_x.max(point.x);
+        *max_y = max_y.max(point.y);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MarkerKind {
+    Classic,
+    ClassicThin,
+    Open,
+    OpenThin,
+    OpenAsync,
+    Oval,
+    Diamond,
+    DiamondThin,
+    Block,
+    BlockThin,
+    Async,
+    Box,
+    HalfCircle,
+    Dash,
+    Cross,
+    CirclePlus,
+    Circle,
+    BaseDash,
+    ERone,
+    ERmandOne,
+    ERmany,
+    ERoneToMany,
+    ERzeroToOne,
+    ERzeroToMany,
+    DoubleBlock,
+}
+
+fn marker_kind_from_value(value: Option<&str>) -> Option<MarkerKind> {
+    match value? {
+        "classic" => Some(MarkerKind::Classic),
+        "classicThin" => Some(MarkerKind::ClassicThin),
+        "open" => Some(MarkerKind::Open),
+        "openThin" => Some(MarkerKind::OpenThin),
+        "openAsync" => Some(MarkerKind::OpenAsync),
+        "oval" => Some(MarkerKind::Oval),
+        "diamond" => Some(MarkerKind::Diamond),
+        "diamondThin" => Some(MarkerKind::DiamondThin),
+        "block" => Some(MarkerKind::Block),
+        "blockThin" => Some(MarkerKind::BlockThin),
+        "async" => Some(MarkerKind::Async),
+        "box" => Some(MarkerKind::Box),
+        "halfCircle" => Some(MarkerKind::HalfCircle),
+        "dash" => Some(MarkerKind::Dash),
+        "cross" => Some(MarkerKind::Cross),
+        "circlePlus" => Some(MarkerKind::CirclePlus),
+        "circle" => Some(MarkerKind::Circle),
+        "baseDash" => Some(MarkerKind::BaseDash),
+        "ERone" => Some(MarkerKind::ERone),
+        "ERmandOne" => Some(MarkerKind::ERmandOne),
+        "ERmany" => Some(MarkerKind::ERmany),
+        "ERoneToMany" => Some(MarkerKind::ERoneToMany),
+        "ERzeroToOne" => Some(MarkerKind::ERzeroToOne),
+        "ERzeroToMany" => Some(MarkerKind::ERzeroToMany),
+        "doubleBlock" => Some(MarkerKind::DoubleBlock),
+        _ => None,
+    }
+}
+
+fn marker_offsets(style: Option<&str>, stroke_width: f64) -> (f64, f64) {
+    let shape = style_value(style, "shape");
+    if matches!(shape, Some("arrow" | "link" | "flexArrow")) {
+        return (0.0, 0.0);
+    }
+    let (tip_gap, arrow_length, arrow_back, arrow_half_height) = edge_arrow_metrics(stroke_width);
+    let start_kind = marker_kind_from_value(style_value(style, "startArrow"));
+    let end_kind = match style_value(style, "endArrow") {
+        Some("none") => None,
+        Some(value) => marker_kind_from_value(Some(value)),
+        None => Some(MarkerKind::Classic),
+    };
+    let start_offset = marker_line_offset(
+        start_kind,
+        stroke_width,
+        tip_gap,
+        arrow_length,
+        arrow_back,
+        arrow_half_height,
+    );
+    let end_offset = marker_line_offset(
+        end_kind,
+        stroke_width,
+        tip_gap,
+        arrow_length,
+        arrow_back,
+        arrow_half_height,
+    );
+    (start_offset, end_offset)
+}
+
+fn marker_line_offset(
+    kind: Option<MarkerKind>,
+    stroke_width: f64,
+    tip_gap: f64,
+    arrow_length: f64,
+    arrow_back: f64,
+    _arrow_half_height: f64,
+) -> f64 {
+    match kind {
+        None => 0.0,
+        Some(MarkerKind::Classic) | Some(MarkerKind::ClassicThin) => tip_gap + arrow_length,
+        Some(MarkerKind::Open) | Some(MarkerKind::OpenThin) => tip_gap * 2.0,
+        Some(MarkerKind::OpenAsync)
+        | Some(MarkerKind::Dash)
+        | Some(MarkerKind::Cross)
+        | Some(MarkerKind::BaseDash)
+        | Some(MarkerKind::ERone)
+        | Some(MarkerKind::ERmandOne)
+        | Some(MarkerKind::ERmany)
+        | Some(MarkerKind::ERoneToMany) => 0.0,
+        Some(MarkerKind::ERzeroToOne) | Some(MarkerKind::ERzeroToMany) => stroke_width * 6.0,
+        Some(MarkerKind::Oval) => 3.0 * stroke_width,
+        Some(MarkerKind::Diamond) => {
+            if (stroke_width - 1.0).abs() < f64::EPSILON {
+                7.71
+            } else {
+                tip_gap + arrow_length
+            }
+        }
+        Some(MarkerKind::DiamondThin) => {
+            if (stroke_width - 1.0).abs() < f64::EPSILON {
+                7.99
+            } else {
+                tip_gap + arrow_length
+            }
+        }
+        Some(MarkerKind::Block) | Some(MarkerKind::BlockThin) | Some(MarkerKind::Async) => {
+            tip_gap + arrow_length + arrow_back
+        }
+        Some(MarkerKind::Box) | Some(MarkerKind::HalfCircle) => 8.0,
+        Some(MarkerKind::Circle) | Some(MarkerKind::CirclePlus) => stroke_width * 9.0,
+        Some(MarkerKind::DoubleBlock) => tip_gap + 2.0 * (arrow_length + arrow_back),
+    }
+}
+
+fn render_edge_markers(
+    edge: &MxCell,
+    edge_path: &EdgePath,
+    min_x: f64,
+    min_y: f64,
+    stroke_attr: &str,
+    stroke_style_attr: &str,
+    stroke_width_attr: &str,
+) -> String {
+    let style = edge.style.as_deref();
+    let shape = style_value(style, "shape");
+    if matches!(shape, Some("arrow" | "link" | "flexArrow")) {
+        return String::new();
+    }
+    let stroke_width = stroke_width_value(style);
+    let (tip_gap, arrow_length, arrow_back, arrow_half_height) = edge_arrow_metrics(stroke_width);
+    let start_kind = marker_kind_from_value(style_value(style, "startArrow"));
+    let end_kind = match style_value(style, "endArrow") {
+        Some("none") => None,
+        Some(value) => marker_kind_from_value(Some(value)),
+        None => Some(MarkerKind::Classic),
+    };
+    let start_fill = style_value(style, "startFill") != Some("0");
+    let end_fill = style_value(style, "endFill") != Some("0");
+    let ctx = MarkerContext {
+        stroke_width,
+        tip_gap,
+        arrow_length,
+        arrow_back,
+        arrow_half_height,
+        min_x,
+        min_y,
+        stroke_attr,
+        stroke_style_attr,
+        stroke_width_attr,
+    };
+    let mut out = String::new();
+    if let Some(kind) = start_kind {
+        out.push_str(&render_marker(
+            kind,
+            edge_path.source_anchor,
+            edge_path.start_dir,
+            start_fill,
+            &ctx,
+        ));
+    }
+    if let Some(kind) = end_kind {
+        out.push_str(&render_marker(
+            kind,
+            edge_path.target_anchor,
+            Point {
+                x: -edge_path.end_dir.x,
+                y: -edge_path.end_dir.y,
+            },
+            end_fill,
+            &ctx,
+        ));
+    }
+    out
+}
+
+struct MarkerContext<'a> {
+    stroke_width: f64,
+    tip_gap: f64,
+    arrow_length: f64,
+    arrow_back: f64,
+    arrow_half_height: f64,
+    min_x: f64,
+    min_y: f64,
+    stroke_attr: &'a str,
+    stroke_style_attr: &'a str,
+    stroke_width_attr: &'a str,
+}
+
+fn render_marker(
+    kind: MarkerKind,
+    anchor: Point,
+    dir: Point,
+    filled: bool,
+    ctx: &MarkerContext<'_>,
+) -> String {
+    let perp = Point {
+        x: -dir.y,
+        y: dir.x,
+    };
+    let to_world = |p: Point| Point {
+        x: anchor.x + dir.x * p.x + perp.x * p.y,
+        y: anchor.y + dir.y * p.x + perp.y * p.y,
+    };
+    let arrow_half_height = ctx.arrow_half_height;
+    let tip_gap = ctx.tip_gap;
+    let arrow_length = ctx.arrow_length;
+    let arrow_back = ctx.arrow_back;
+    let stroke_width = ctx.stroke_width;
+    let min_x = ctx.min_x;
+    let min_y = ctx.min_y;
+    let stroke_attr = ctx.stroke_attr;
+    let stroke_width_attr = ctx.stroke_width_attr;
+    let fill_value = if filled { ctx.stroke_attr } else { "none" };
+    let marker_style_attr = marker_style_attr(ctx.stroke_style_attr, filled);
+    let mut out = String::new();
+    match kind {
+        MarkerKind::Classic | MarkerKind::ClassicThin => {
+            let half_height = if kind == MarkerKind::ClassicThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            let tip = to_world(Point { x: tip_gap, y: 0.0 });
+            let base = to_world(Point {
+                x: tip_gap + arrow_length,
+                y: 0.0,
+            });
+            let left = to_world(Point {
+                x: tip_gap + arrow_length + arrow_back,
+                y: -half_height,
+            });
+            let right = to_world(Point {
+                x: tip_gap + arrow_length + arrow_back,
+                y: half_height,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(left.x - min_x),
+                fmt_num(left.y - min_y),
+                fmt_num(base.x - min_x),
+                fmt_num(base.y - min_y),
+                fmt_num(right.x - min_x),
+                fmt_num(right.y - min_y),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Open | MarkerKind::OpenThin => {
+            let half_height = if kind == MarkerKind::OpenThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            let tip = to_world(Point { x: tip_gap, y: 0.0 });
+            let left = to_world(Point {
+                x: tip_gap + arrow_length + arrow_back,
+                y: -half_height,
+            });
+            let right = to_world(Point {
+                x: tip_gap + arrow_length + arrow_back,
+                y: half_height,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(left.x - min_x),
+                fmt_num(left.y - min_y),
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(right.x - min_x),
+                fmt_num(right.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::OpenAsync => {
+            let tip = to_world(Point { x: tip_gap, y: 0.0 });
+            let back = to_world(Point {
+                x: tip_gap + arrow_length + arrow_back,
+                y: -arrow_half_height,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(back.x - min_x),
+                fmt_num(back.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Oval => {
+            let radius = 3.0 * stroke_width;
+            let center = to_world(Point { x: 0.0, y: 0.0 });
+            write!(
+                out,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{} />",
+                fmt_num(center.x - min_x),
+                fmt_num(center.y - min_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Diamond | MarkerKind::DiamondThin => {
+            let half_width = 3.5;
+            let half_height = if kind == MarkerKind::DiamondThin {
+                2.06
+            } else {
+                3.5
+            };
+            let local_tip_gap = if kind == MarkerKind::DiamondThin {
+                0.99
+            } else {
+                0.71
+            };
+            let tip = to_world(Point {
+                x: local_tip_gap,
+                y: 0.0,
+            });
+            let upper = to_world(Point {
+                x: local_tip_gap + half_width,
+                y: -half_height,
+            });
+            let base = to_world(Point {
+                x: local_tip_gap + 2.0 * half_width,
+                y: 0.0,
+            });
+            let lower = to_world(Point {
+                x: local_tip_gap + half_width,
+                y: half_height,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(upper.x - min_x),
+                fmt_num(upper.y - min_y),
+                fmt_num(base.x - min_x),
+                fmt_num(base.y - min_y),
+                fmt_num(lower.x - min_x),
+                fmt_num(lower.y - min_y),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Block | MarkerKind::BlockThin => {
+            let half_height = if kind == MarkerKind::BlockThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            let back_len = arrow_length + arrow_back;
+            let tip = to_world(Point { x: tip_gap, y: 0.0 });
+            let upper = to_world(Point {
+                x: tip_gap + back_len,
+                y: -half_height,
+            });
+            let lower = to_world(Point {
+                x: tip_gap + back_len,
+                y: half_height,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(upper.x - min_x),
+                fmt_num(upper.y - min_y),
+                fmt_num(lower.x - min_x),
+                fmt_num(lower.y - min_y),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Async => {
+            let back_len = arrow_length + arrow_back;
+            let tip = to_world(Point { x: tip_gap, y: 0.0 });
+            let upper = to_world(Point {
+                x: tip_gap + back_len,
+                y: -arrow_half_height,
+            });
+            let base = to_world(Point {
+                x: tip_gap + back_len,
+                y: 0.0,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(tip.x - min_x),
+                fmt_num(tip.y - min_y),
+                fmt_num(upper.x - min_x),
+                fmt_num(upper.y - min_y),
+                fmt_num(base.x - min_x),
+                fmt_num(base.y - min_y),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Box => {
+            let size = 8.0;
+            let top_left = to_world(Point { x: 0.0, y: -4.0 });
+            let top_right = to_world(Point { x: size, y: -4.0 });
+            let bottom_right = to_world(Point { x: size, y: 4.0 });
+            let bottom_left = to_world(Point { x: 0.0, y: 4.0 });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(top_left.x - min_x),
+                fmt_num(top_left.y - min_y),
+                fmt_num(bottom_left.x - min_x),
+                fmt_num(bottom_left.y - min_y),
+                fmt_num(bottom_right.x - min_x),
+                fmt_num(bottom_right.y - min_y),
+                fmt_num(top_right.x - min_x),
+                fmt_num(top_right.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::HalfCircle => {
+            let radius = 8.0;
+            let start = to_world(Point { x: 0.0, y: -radius });
+            let mid = to_world(Point { x: radius, y: 0.0 });
+            let end = to_world(Point { x: 0.0, y: radius });
+            let ctrl_top = to_world(Point {
+                x: radius,
+                y: -radius,
+            });
+            let ctrl_bottom = to_world(Point {
+                x: radius,
+                y: radius,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} Q {} {} {} {} Q {} {} {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(start.x - min_x),
+                fmt_num(start.y - min_y),
+                fmt_num(ctrl_top.x - min_x),
+                fmt_num(ctrl_top.y - min_y),
+                fmt_num(mid.x - min_x),
+                fmt_num(mid.y - min_y),
+                fmt_num(ctrl_bottom.x - min_x),
+                fmt_num(ctrl_bottom.y - min_y),
+                fmt_num(end.x - min_x),
+                fmt_num(end.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Dash => {
+            let start = to_world(Point { x: 4.0, y: -4.0 });
+            let end = to_world(Point { x: 12.0, y: 4.0 });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(start.x - min_x),
+                fmt_num(start.y - min_y),
+                fmt_num(end.x - min_x),
+                fmt_num(end.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::Cross => {
+            let size = 9.0;
+            let center = 9.0;
+            let a = to_world(Point {
+                x: center - size / 2.0,
+                y: -size / 2.0,
+            });
+            let b = to_world(Point {
+                x: center + size / 2.0,
+                y: size / 2.0,
+            });
+            let c = to_world(Point {
+                x: center - size / 2.0,
+                y: size / 2.0,
+            });
+            let d = to_world(Point {
+                x: center + size / 2.0,
+                y: -size / 2.0,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(a.x - min_x),
+                fmt_num(a.y - min_y),
+                fmt_num(b.x - min_x),
+                fmt_num(b.y - min_y),
+                fmt_num(c.x - min_x),
+                fmt_num(c.y - min_y),
+                fmt_num(d.x - min_x),
+                fmt_num(d.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::CirclePlus | MarkerKind::Circle => {
+            let radius = 4.0 * stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            let center = to_world(Point {
+                x: center_offset,
+                y: 0.0,
+            });
+            write!(
+                out,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{} />",
+                fmt_num(center.x - min_x),
+                fmt_num(center.y - min_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+            if kind == MarkerKind::CirclePlus {
+                let left = to_world(Point {
+                    x: center_offset - radius,
+                    y: 0.0,
+                });
+                let right = to_world(Point {
+                    x: center_offset + radius,
+                    y: 0.0,
+                });
+                let top = to_world(Point {
+                    x: center_offset,
+                    y: -radius,
+                });
+                let bottom = to_world(Point {
+                    x: center_offset,
+                    y: radius,
+                });
+                write!(
+                    out,
+                    "<path d=\"M {} {} L {} {} M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                    fmt_num(left.x - min_x),
+                    fmt_num(left.y - min_y),
+                    fmt_num(right.x - min_x),
+                    fmt_num(right.y - min_y),
+                    fmt_num(top.x - min_x),
+                    fmt_num(top.y - min_y),
+                    fmt_num(bottom.x - min_x),
+                    fmt_num(bottom.y - min_y),
+                    stroke_attr,
+                    stroke_width_attr,
+                    marker_style_attr
+                )
+                .unwrap();
+            }
+        }
+        MarkerKind::BaseDash | MarkerKind::ERone => {
+            let length = 9.0;
+            let top = to_world(Point {
+                x: 0.0,
+                y: -length / 2.0,
+            });
+            let bottom = to_world(Point {
+                x: 0.0,
+                y: length / 2.0,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(top.x - min_x),
+                fmt_num(top.y - min_y),
+                fmt_num(bottom.x - min_x),
+                fmt_num(bottom.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::ERmandOne => {
+            let length = 9.0;
+            let offsets = [4.5, 9.0];
+            for offset in offsets {
+                let top = to_world(Point {
+                    x: offset,
+                    y: -length / 2.0,
+                });
+                let bottom = to_world(Point {
+                    x: offset,
+                    y: length / 2.0,
+                });
+                write!(
+                    out,
+                    "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                    fmt_num(top.x - min_x),
+                    fmt_num(top.y - min_y),
+                    fmt_num(bottom.x - min_x),
+                    fmt_num(bottom.y - min_y),
+                    stroke_attr,
+                    stroke_width_attr,
+                    marker_style_attr
+                )
+                .unwrap();
+            }
+        }
+        MarkerKind::ERmany => {
+            let a = to_world(Point { x: 0.0, y: 5.0 });
+            let b = to_world(Point { x: 10.0, y: 0.0 });
+            let c = to_world(Point { x: 0.0, y: -5.0 });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(a.x - min_x),
+                fmt_num(a.y - min_y),
+                fmt_num(b.x - min_x),
+                fmt_num(b.y - min_y),
+                fmt_num(c.x - min_x),
+                fmt_num(c.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::ERoneToMany => {
+            let line_len = 10.0;
+            let top = to_world(Point {
+                x: 10.0,
+                y: -line_len / 2.0,
+            });
+            let bottom = to_world(Point {
+                x: 10.0,
+                y: line_len / 2.0,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(top.x - min_x),
+                fmt_num(top.y - min_y),
+                fmt_num(bottom.x - min_x),
+                fmt_num(bottom.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+            out.push_str(&render_marker(MarkerKind::ERmany, anchor, dir, false, ctx));
+        }
+        MarkerKind::ERzeroToOne => {
+            let radius = stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            let center = to_world(Point {
+                x: center_offset,
+                y: 0.0,
+            });
+            write!(
+                out,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"none\" stroke=\"{}\" pointer-events=\"all\"{}{} />",
+                fmt_num(center.x - min_x),
+                fmt_num(center.y - min_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+            let v_top = to_world(Point { x: 5.0, y: -5.0 });
+            let v_bottom = to_world(Point { x: 5.0, y: 5.0 });
+            let h_left = to_world(Point { x: 0.0, y: 0.0 });
+            let h_right = to_world(Point { x: 11.5, y: 0.0 });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(v_top.x - min_x),
+                fmt_num(v_top.y - min_y),
+                fmt_num(v_bottom.x - min_x),
+                fmt_num(v_bottom.y - min_y),
+                fmt_num(h_left.x - min_x),
+                fmt_num(h_left.y - min_y),
+                fmt_num(h_right.x - min_x),
+                fmt_num(h_right.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::ERzeroToMany => {
+            let radius = stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            let center = to_world(Point {
+                x: center_offset,
+                y: 0.0,
+            });
+            write!(
+                out,
+                "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"none\" stroke=\"{}\" pointer-events=\"all\"{}{} />",
+                fmt_num(center.x - min_x),
+                fmt_num(center.y - min_y),
+                fmt_num(radius),
+                fmt_num(radius),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+            let a = to_world(Point { x: 0.0, y: 5.0 });
+            let b = to_world(Point { x: 10.0, y: 0.0 });
+            let c = to_world(Point { x: 0.0, y: -5.0 });
+            let mid = to_world(Point { x: 0.0, y: 0.0 });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {} L {} {} M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(a.x - min_x),
+                fmt_num(a.y - min_y),
+                fmt_num(b.x - min_x),
+                fmt_num(b.y - min_y),
+                fmt_num(c.x - min_x),
+                fmt_num(c.y - min_y),
+                fmt_num(b.x - min_x),
+                fmt_num(b.y - min_y),
+                fmt_num(mid.x - min_x),
+                fmt_num(mid.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
+        MarkerKind::DoubleBlock => {
+            let back_len = arrow_length + arrow_back;
+            for idx in 0..2 {
+                let tip_x = tip_gap + back_len * idx as f64;
+                let tip = to_world(Point { x: tip_x, y: 0.0 });
+                let upper = to_world(Point {
+                    x: tip_x + back_len,
+                    y: -arrow_half_height,
+                });
+                let lower = to_world(Point {
+                    x: tip_x + back_len,
+                    y: arrow_half_height,
+                });
+                write!(
+                    out,
+                    "<path d=\"M {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                    fmt_num(tip.x - min_x),
+                    fmt_num(tip.y - min_y),
+                    fmt_num(upper.x - min_x),
+                    fmt_num(upper.y - min_y),
+                    fmt_num(lower.x - min_x),
+                    fmt_num(lower.y - min_y),
+                    fill_value,
+                    stroke_attr,
+                    stroke_width_attr,
+                    marker_style_attr
+                )
+                .unwrap();
+            }
+        }
+    }
+    out
+}
+
+fn marker_style_attr(stroke_style_attr: &str, filled: bool) -> String {
+    let Some(inner) = stroke_style_attr
+        .trim()
+        .strip_prefix("style=\"")
+        .and_then(|value| value.strip_suffix('"'))
+    else {
+        return String::new();
+    };
+    if !filled {
+        return format!(" style=\"{inner}\"");
+    }
+    if let Some(value) = inner
+        .strip_prefix("stroke: ")
+        .and_then(|value| value.strip_suffix(';'))
+    {
+        return format!(" style=\"fill: {value}; stroke: {value};\"");
+    }
+    format!(" style=\"{inner}\"")
 }
 
 fn edge_transform(style: Option<&str>) -> Option<&'static str> {

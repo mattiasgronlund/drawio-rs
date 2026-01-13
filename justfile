@@ -15,12 +15,12 @@ test:
   cargo test
 
 
-# Update fixtures
-update-fixtures:
-  UPDATE_FIXTURES=1 cargo test
+# Update expected
+update-expected:
+  UPDATE_EXPECTED=1 cargo test
 
 # Run tests but keep keep cannonicalized svg files
-keep-cannonicalized:
+test-keep-cannonicalized:
   KEEP_CANNONICALIZED_SVG=1 cargo test
 
 # Run coverage
