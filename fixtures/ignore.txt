@@ -1,7 +1,6 @@
 # Relative to fixtures/corpus
 handpicked/011-rotation.drawio
 handpicked/013-image-embed.drawio
-handpicked/015-container-relative.drawio
 handpicked/016-swimlane.drawio
 handpicked/017-gradients.drawio
 handpicked/018-edge-routing-extra.drawio

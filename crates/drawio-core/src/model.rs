@@ -94,6 +94,9 @@ pub struct MxGraphModel {
 
     #[serde(default)]
     pub root: Root,
+
+    #[serde(skip)]
+    pub user_objects: Vec<MxCell>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -132,6 +135,9 @@ pub struct MxCell {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<MxGeometry>,
+
+    #[serde(default, skip)]
+    pub order: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

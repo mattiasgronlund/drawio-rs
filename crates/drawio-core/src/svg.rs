@@ -1,4 +1,4 @@
-use crate::model::{Diagram, MxCell, MxFile, MxGeometry, MxPoint};
+use crate::model::{Diagram, MxCell, MxFile, MxGeometry, MxGraphModel, MxPoint};
 #[cfg(feature = "edge-debug")]
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -46,7 +46,7 @@ pub fn debug_render_tree(mxfile: &MxFile, diagram_index: usize) -> SvgResult<Str
         .as_ref()
         .ok_or(SvgError::MissingGraphModel)?;
     let mut children_by_parent: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
-    for cell in &graph.root.cells {
+    for cell in ordered_cells(graph) {
         let parent_key = cell.parent.clone().unwrap_or_else(|| ROOT_KEY.to_string());
         children_by_parent.entry(parent_key).or_default().push(cell);
     }
@@ -79,7 +79,7 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
         .ok_or(SvgError::MissingGraphModel)?;
     let mut cell_by_id = BTreeMap::new();
     let mut children_by_parent: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
-    for cell in &graph.root.cells {
+    for cell in ordered_cells(graph) {
         cell_by_id.insert(cell.id.clone(), cell);
         let parent_key = cell.parent.clone().unwrap_or_else(|| ROOT_KEY.to_string());
         children_by_parent.entry(parent_key).or_default().push(cell);
@@ -91,7 +91,7 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
     let mut vertices = Vec::new();
     let mut edges = Vec::new();
     let mut edge_labels: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
-    for cell in &graph.root.cells {
+    for cell in ordered_cells(graph) {
         if !visible_by_id.get(&cell.id).copied().unwrap_or(true) {
             continue;
         }
@@ -179,6 +179,17 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
     }
     out.push_str("</svg>");
     Ok(out)
+}
+
+fn ordered_cells(graph: &MxGraphModel) -> Vec<&MxCell> {
+    let mut cells: Vec<&MxCell> = graph
+        .root
+        .cells
+        .iter()
+        .chain(graph.user_objects.iter())
+        .collect();
+    cells.sort_by_key(|cell| cell.order);
+    cells
 }
 
 #[cfg(feature = "edge-debug")]
@@ -324,13 +335,101 @@ fn render_cells_recursive(
             let stroke_width_attr = stroke_width_attr(style);
             let gradient_fill = gradient_fill_by_id.get(&cell.id).map(|id| id.as_str());
             let (fill_attr, stroke_attr, style_attr) = shape_paint_attrs(style, gradient_fill);
+            let (_, stroke_style_attr) = edge_stroke_attrs(style);
             let rotation_attr = shape_rotation_attr(style, x, y, width, height);
             let transform = vertex_transform(style);
             let (open, close) = match transform {
                 Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
                 None => ("<g>".to_string(), "</g>".to_string()),
             };
-            if style_value(style, "shape") == Some("message") {
+            if is_swimlane(style) {
+                let start_size = swimlane_start_size(style);
+                let header_y = y + start_size;
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(header_y),
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(x + width),
+                    fmt_num(y),
+                    fmt_num(x + width),
+                    fmt_num(header_y),
+                    fill_attr,
+                    stroke_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    fmt_num(x),
+                    fmt_num(header_y),
+                    fmt_num(x),
+                    fmt_num(y + height),
+                    fmt_num(x + width),
+                    fmt_num(y + height),
+                    fmt_num(x + width),
+                    fmt_num(header_y),
+                    stroke_attr,
+                    stroke_width_attr,
+                    stroke_style_attr,
+                    rotation_attr,
+                    fmt_num(x),
+                    fmt_num(header_y),
+                    fmt_num(x + width),
+                    fmt_num(header_y),
+                    stroke_attr,
+                    stroke_width_attr,
+                    stroke_style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            } else if is_partial_rectangle(style) {
+                let top = style_value(style, "top") != Some("0");
+                let right = style_value(style, "right") != Some("0");
+                let bottom = style_value(style, "bottom") != Some("0");
+                let left = style_value(style, "left") != Some("0");
+                let mut d = String::new();
+                write!(d, "M {} {}", fmt_num(x), fmt_num(y)).unwrap();
+                if top {
+                    write!(d, " L {} {}", fmt_num(x + width), fmt_num(y)).unwrap();
+                } else {
+                    write!(d, " M {} {}", fmt_num(x + width), fmt_num(y)).unwrap();
+                }
+                if right {
+                    write!(d, " L {} {}", fmt_num(x + width), fmt_num(y + height)).unwrap();
+                } else {
+                    write!(d, " M {} {}", fmt_num(x + width), fmt_num(y + height)).unwrap();
+                }
+                if bottom {
+                    write!(d, " L {} {}", fmt_num(x), fmt_num(y + height)).unwrap();
+                } else {
+                    write!(d, " M {} {}", fmt_num(x), fmt_num(y + height)).unwrap();
+                }
+                if left {
+                    write!(d, " L {} {}", fmt_num(x), fmt_num(y)).unwrap();
+                }
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<rect fill=\"none\" height=\"{}\" pointer-events=\"all\" stroke=\"none\" width=\"{}\" x=\"{}\" y=\"{}\"{} /><path d=\"{}\" fill=\"none\" pointer-events=\"all\" stroke=\"{}\" stroke-linecap=\"square\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(height),
+                    fmt_num(width),
+                    fmt_num(x),
+                    fmt_num(y),
+                    rotation_attr,
+                    d,
+                    stroke_attr,
+                    stroke_width_attr,
+                    stroke_style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            } else if style_value(style, "shape") == Some("message") {
                 let (edge_stroke, edge_style_attr) = edge_stroke_attrs(style);
                 write!(
                     out,
@@ -365,6 +464,57 @@ fn render_cells_recursive(
                     close
                 )
                 .unwrap();
+            } else if is_uml_actor(style) {
+                let head_radius = width / 4.0;
+                let center_x = x + width / 2.0;
+                let head_center_y = y + head_radius;
+                let body_top = y + head_radius * 2.0;
+                let body_bottom = y + height * (2.0 / 3.0);
+                let arms_y = y + height / 3.0;
+                let leg_y = y + height;
+                let arm_span = width / 2.0;
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} /><path d=\"M {} {} L {} {} M {} {} L {} {} M {} {} L {} {} M {} {} L {} {} M {} {} L {} {}\" fill=\"none\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(center_x),
+                    fmt_num(head_center_y),
+                    fmt_num(head_radius),
+                    fmt_num(head_radius),
+                    fill_attr,
+                    stroke_attr,
+                    dash_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    fmt_num(center_x),
+                    fmt_num(body_top),
+                    fmt_num(center_x),
+                    fmt_num(body_bottom),
+                    fmt_num(center_x),
+                    fmt_num(arms_y),
+                    fmt_num(center_x - arm_span),
+                    fmt_num(arms_y),
+                    fmt_num(center_x),
+                    fmt_num(arms_y),
+                    fmt_num(center_x + arm_span),
+                    fmt_num(arms_y),
+                    fmt_num(center_x),
+                    fmt_num(body_bottom),
+                    fmt_num(center_x - arm_span),
+                    fmt_num(leg_y),
+                    fmt_num(center_x),
+                    fmt_num(body_bottom),
+                    fmt_num(center_x + arm_span),
+                    fmt_num(leg_y),
+                    stroke_attr,
+                    stroke_width_attr,
+                    stroke_style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
             } else if is_ellipse(style) {
                 write!(
                     out,
@@ -386,7 +536,10 @@ fn render_cells_recursive(
                 .unwrap();
             } else {
                 let rounding = if is_rounded(style) {
-                    let radius = (width.min(height) * 0.15).clamp(3.0, 10.0);
+                    let radius = style_value(style, "arcSize")
+                        .and_then(|value| value.parse::<f64>().ok())
+                        .map(|arc| width.min(height) * arc / 100.0)
+                        .unwrap_or_else(|| (width.min(height) * 0.15).clamp(3.0, 10.0));
                     format!(" rx=\"{}\" ry=\"{}\"", fmt_num(radius), fmt_num(radius))
                 } else {
                     String::new()
@@ -411,9 +564,32 @@ fn render_cells_recursive(
                 )
                 .unwrap();
             }
-            if let Some(label) = render_vertex_label(cell, x, y, width, height) {
+            if is_swimlane(style) {
+                if let Some((label, uses_ext)) =
+                    render_swimlane_label(cell, x, y, width, swimlane_start_size(style))
+                {
+                    out.push_str(&label);
+                    if uses_ext {
+                        *requires_extensibility = true;
+                    }
+                }
+            } else if let Some(label) = render_vertex_label(cell, x, y, width, height) {
                 out.push_str(&label);
                 *requires_extensibility = true;
+            }
+            if children_by_parent.contains_key(cell.id.as_str()) {
+                render_cells_recursive(
+                    cell.id.as_str(),
+                    out,
+                    children_by_parent,
+                    visible_by_id,
+                    cell_by_id,
+                    edge_labels,
+                    gradient_fill_by_id,
+                    min_x,
+                    min_y,
+                    requires_extensibility,
+                )?;
             }
             out.push_str("</g>");
             continue;
@@ -614,6 +790,7 @@ struct EdgePath {
     target_anchor: Point,
     start_dir: Point,
     end_dir: Point,
+    entity_relation_target_ancestor: bool,
 }
 
 #[cfg(feature = "edge-debug")]
@@ -865,11 +1042,14 @@ fn edge_line_paths(
     {
         return vec![segment];
     }
+    if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
+        let segment = style_value(style, "segment")
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(10.0);
+        return vec![entity_relation_path(edge_path, min_x, min_y, segment)];
+    }
     if style_value(style, "curved") == Some("1") {
         return vec![curved_edge_path(edge_path, min_x, min_y)];
-    }
-    if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
-        return vec![entity_relation_path(edge_path, min_x, min_y)];
     }
     if style_value(style, "rounded") != Some("0") && edge_path.line_points.len() > 2 {
         return vec![rounded_edge_path(edge_path, min_x, min_y)];
@@ -1000,13 +1180,19 @@ fn edge_path_absolute(
         }
     }
 
-    let (source, target) = match (edge.source.as_ref(), edge.target.as_ref()) {
-        (Some(source_id), Some(target_id)) => {
-            let source = cell_by_id.get(source_id).copied();
-            let target = cell_by_id.get(target_id).copied();
-            (source, target)
-        }
-        _ => (None, None),
+    let source_raw = edge
+        .source
+        .as_ref()
+        .and_then(|source_id| cell_by_id.get(source_id).copied());
+    let target_raw = edge
+        .target
+        .as_ref()
+        .and_then(|target_id| cell_by_id.get(target_id).copied());
+    let source = source_raw.and_then(|cell| resolve_visible_terminal(cell, cell_by_id));
+    let target = target_raw.and_then(|cell| resolve_visible_terminal(cell, cell_by_id));
+    let target_hint_center = match (target_raw, target) {
+        (Some(raw), Some(resolved)) if raw.id != resolved.id => cell_center(raw, cell_by_id).ok(),
+        _ => None,
     };
 
     if source_point.is_none() && target_point.is_none() && source.is_none() && target.is_none() {
@@ -1021,14 +1207,43 @@ fn edge_path_absolute(
         {
             source_point = Some(point);
         } else {
-            let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
-                == Some("orthogonalEdgeStyle")
-                && !is_ellipse(source_cell.style.as_deref());
+            let edge_style = style_value(edge.style.as_deref(), "edgeStyle");
+            let use_orthogonal_terminal = (matches!(
+                edge_style,
+                Some("orthogonalEdgeStyle") | Some("elbowEdgeStyle")
+            ) && !is_ellipse(source_cell.style.as_deref()))
+                || (edge_style == Some("entityRelationEdgeStyle")
+                    && !is_partial_rectangle(source_cell.style.as_deref()));
             let source_center = cell_center(source_cell, cell_by_id)?;
-            let target_dir = if let Some(first) = control_points.first() {
+            let mut target_dir = if use_orthogonal_terminal {
+                if let Some(hint_center) = target_hint_center {
+                    Point {
+                        x: hint_center.x - source_center.x,
+                        y: hint_center.y - source_center.y,
+                    }
+                } else if let Some(target_cell) = target {
+                    let target_center = cell_center(target_cell, cell_by_id)?;
+                    Point {
+                        x: target_center.x - source_center.x,
+                        y: target_center.y - source_center.y,
+                    }
+                } else if let Some(first) = control_points.first() {
+                    Point {
+                        x: first.x - source_center.x,
+                        y: first.y - source_center.y,
+                    }
+                } else {
+                    Point { x: 1.0, y: 0.0 }
+                }
+            } else if let Some(first) = control_points.first() {
                 Point {
                     x: first.x - source_center.x,
                     y: first.y - source_center.y,
+                }
+            } else if let Some(hint_center) = target_hint_center {
+                Point {
+                    x: hint_center.x - source_center.x,
+                    y: hint_center.y - source_center.y,
                 }
             } else if let Some(target_cell) = target {
                 let target_center = cell_center(target_cell, cell_by_id)?;
@@ -1039,6 +1254,9 @@ fn edge_path_absolute(
             } else {
                 Point { x: 1.0, y: 0.0 }
             };
+            if use_orthogonal_terminal {
+                target_dir = constrain_port_direction(edge.style.as_deref(), true, target_dir);
+            }
             let spacing = perimeter_spacing(source_cell.style.as_deref());
             source_point = Some(if use_orthogonal_terminal {
                 orthogonal_terminal_point_for_cell(source_cell, target_dir, spacing, cell_by_id)?
@@ -1056,11 +1274,65 @@ fn edge_path_absolute(
         {
             target_point = Some(point);
         } else {
-            let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
-                == Some("orthogonalEdgeStyle")
-                && !is_ellipse(target_cell.style.as_deref());
+            let edge_style = style_value(edge.style.as_deref(), "edgeStyle");
+            let use_orthogonal_terminal = (matches!(
+                edge_style,
+                Some("orthogonalEdgeStyle") | Some("elbowEdgeStyle")
+            ) && !is_ellipse(target_cell.style.as_deref()))
+                || (edge_style == Some("entityRelationEdgeStyle")
+                    && !is_partial_rectangle(target_cell.style.as_deref()));
             let target_center = cell_center(target_cell, cell_by_id)?;
-            let source_dir = if let Some(last) = control_points.last() {
+            let target_hint_dir = target_hint_center.map(|hint_center| Point {
+                x: hint_center.x - target_center.x,
+                y: hint_center.y - target_center.y,
+            });
+            let source_has_exit = style_value(edge.style.as_deref(), "exitX").is_some()
+                && style_value(edge.style.as_deref(), "exitY").is_some();
+            let mut source_dir = if use_orthogonal_terminal {
+                if source_has_exit {
+                    if let Some(source_anchor) = source_point {
+                        Point {
+                            x: source_anchor.x - target_center.x,
+                            y: source_anchor.y - target_center.y,
+                        }
+                    } else if let Some(source_cell) = source {
+                        let source_center = cell_center(source_cell, cell_by_id)?;
+                        Point {
+                            x: source_center.x - target_center.x,
+                            y: source_center.y - target_center.y,
+                        }
+                    } else if let Some(last) = control_points.last() {
+                        Point {
+                            x: last.x - target_center.x,
+                            y: last.y - target_center.y,
+                        }
+                    } else {
+                        Point { x: -1.0, y: 0.0 }
+                    }
+                } else if let Some(hint_dir) = target_hint_dir {
+                    hint_dir
+                } else if let Some(source_cell) = source {
+                    let source_center = cell_center(source_cell, cell_by_id)?;
+                    Point {
+                        x: source_center.x - target_center.x,
+                        y: source_center.y - target_center.y,
+                    }
+                } else if let Some(source_anchor) = source_point {
+                    Point {
+                        x: source_anchor.x - target_center.x,
+                        y: source_anchor.y - target_center.y,
+                    }
+                } else if let Some(last) = control_points.last() {
+                    Point {
+                        x: last.x - target_center.x,
+                        y: last.y - target_center.y,
+                    }
+                } else {
+                    Point { x: -1.0, y: 0.0 }
+                }
+            } else if let Some(hint_dir) = target_hint_dir {
+                hint_dir
+            } else if let Some(last) = control_points.last() {
                 Point {
                     x: last.x - target_center.x,
                     y: last.y - target_center.y,
@@ -1079,6 +1351,9 @@ fn edge_path_absolute(
             } else {
                 Point { x: -1.0, y: 0.0 }
             };
+            if use_orthogonal_terminal {
+                source_dir = constrain_port_direction(edge.style.as_deref(), false, source_dir);
+            }
             target_point = Some(if use_orthogonal_terminal {
                 orthogonal_terminal_point_for_cell(target_cell, source_dir, 0.0, cell_by_id)?
             } else {
@@ -1131,11 +1406,68 @@ fn edge_path_absolute(
 
     let mut full_points = Vec::with_capacity(control_points.len() + 2);
     full_points.push(start);
-    full_points.extend(control_points);
+    full_points.extend(control_points.iter().copied());
     full_points.push(end);
 
-    let line_points = full_points.clone();
+    let mut line_points = full_points.clone();
+    if style_value(style, "edgeStyle") == Some("elbowEdgeStyle")
+        && let Some(control) = control_points.first()
+    {
+        let elbow = style_value(style, "elbow");
+        line_points = if elbow == Some("horizontal") {
+            vec![
+                start,
+                Point {
+                    x: control.x,
+                    y: start.y,
+                },
+                Point {
+                    x: control.x,
+                    y: end.y,
+                },
+                end,
+            ]
+        } else {
+            vec![
+                start,
+                Point {
+                    x: start.x,
+                    y: control.y,
+                },
+                Point {
+                    x: end.x,
+                    y: control.y,
+                },
+                end,
+            ]
+        };
+        full_points = line_points.clone();
+    } else if style_value(style, "edgeStyle") == Some("orthogonalEdgeStyle")
+        && control_points.is_empty()
+    {
+        line_points = vec![
+            start,
+            Point {
+                x: start.x,
+                y: end.y,
+            },
+            end,
+        ];
+        full_points = line_points.clone();
+    }
     let arrow_points = Vec::new();
+
+    let entity_relation_target_ancestor =
+        if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
+            match (source, target) {
+                (Some(source_cell), Some(target_cell)) => {
+                    is_ancestor(target_cell, source_cell, cell_by_id)
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
 
     Ok(Some(EdgePath {
         full_points,
@@ -1147,6 +1479,7 @@ fn edge_path_absolute(
         target_anchor: end_anchor,
         start_dir,
         end_dir,
+        entity_relation_target_ancestor,
     }))
 }
 
@@ -1188,6 +1521,13 @@ fn terminal_point_for_cell(
         x: x + width / 2.0,
         y: y + height / 2.0,
     };
+    if is_partial_rectangle(cell.style.as_deref())
+        && style_value(cell.style.as_deref(), "bottom") == Some("1")
+    {
+        let x = if direction.x >= 0.0 { x + width } else { x };
+        let y = y + height + spacing;
+        return Ok(Point { x, y });
+    }
     if is_ellipse(cell.style.as_deref()) {
         Ok(ellipse_intersection(
             center, half_w, half_h, rotation, direction,
@@ -1263,6 +1603,29 @@ fn orthogonal_terminal_point_for_cell(
         };
     }
     Ok(point)
+}
+
+fn constrain_port_direction(edge_style: Option<&str>, is_source: bool, direction: Point) -> Point {
+    let constraint = if is_source {
+        style_value(edge_style, "sourcePortConstraint")
+    } else {
+        style_value(edge_style, "targetPortConstraint")
+    };
+    match constraint {
+        Some("east") => Point { x: 1.0, y: 0.0 },
+        Some("west") => Point { x: -1.0, y: 0.0 },
+        Some("north") => Point { x: 0.0, y: -1.0 },
+        Some("south") => Point { x: 0.0, y: 1.0 },
+        Some("eastwest") => {
+            let sign = if direction.x >= 0.0 { 1.0 } else { -1.0 };
+            Point { x: sign, y: 0.0 }
+        }
+        Some("northsouth") => {
+            let sign = if direction.y >= 0.0 { 1.0 } else { -1.0 };
+            Point { x: 0.0, y: sign }
+        }
+        _ => direction,
+    }
 }
 
 fn terminal_point_override(
@@ -1616,10 +1979,12 @@ fn rounded_edge_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLineSe
     }
 }
 
-fn entity_relation_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLineSegment {
-    let segment = 20.0;
-    let curve_ratio = 0.9745;
-    let curve_y_ratio = 0.316;
+fn entity_relation_path(
+    edge_path: &EdgePath,
+    min_x: f64,
+    min_y: f64,
+    segment: f64,
+) -> EdgeLineSegment {
     let start = edge_path
         .line_points
         .first()
@@ -1630,37 +1995,38 @@ fn entity_relation_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLin
         .last()
         .copied()
         .unwrap_or(edge_path.target_anchor);
-    let dir = edge_path.start_dir;
-    let perp = Point {
-        x: -dir.y,
-        y: dir.x,
-    };
-    let source_segment = Point {
-        x: edge_path.source_anchor.x + dir.x * segment,
-        y: edge_path.source_anchor.y + dir.y * segment,
-    };
-    let target_segment = Point {
-        x: edge_path.target_anchor.x - dir.x * segment,
-        y: edge_path.target_anchor.y - dir.y * segment,
-    };
-    let dy = target_segment.y - source_segment.y;
-    let curve_x = segment * curve_ratio;
-    let curve_y = dy * curve_y_ratio;
-    let control_in = Point {
-        x: source_segment.x + dir.x * (segment / 2.0),
-        y: source_segment.y + dir.y * (segment / 2.0),
-    };
-    let control_out = Point {
-        x: target_segment.x - dir.x * (segment / 2.0),
-        y: target_segment.y - dir.y * (segment / 2.0),
-    };
-    let curve_start = Point {
-        x: source_segment.x + dir.x * curve_x + perp.x * curve_y,
-        y: source_segment.y + dir.y * curve_x + perp.y * curve_y,
-    };
-    let curve_end = Point {
-        x: target_segment.x - dir.x * curve_x + perp.x * curve_y,
-        y: target_segment.y - dir.y * curve_x + perp.y * curve_y,
+    let dir = if end.x >= start.x { 1.0 } else { -1.0 };
+    let (control_in, mid, control_out) = if edge_path.entity_relation_target_ancestor {
+        let control_x = end.x + dir * segment;
+        (
+            Point {
+                x: control_x,
+                y: start.y,
+            },
+            Point {
+                x: control_x,
+                y: (start.y + end.y) / 2.0,
+            },
+            Point {
+                x: control_x,
+                y: end.y,
+            },
+        )
+    } else {
+        (
+            Point {
+                x: start.x + dir * segment,
+                y: start.y,
+            },
+            Point {
+                x: (start.x + end.x) / 2.0,
+                y: (start.y + end.y) / 2.0,
+            },
+            Point {
+                x: end.x - dir * segment,
+                y: end.y,
+            },
+        )
     };
     let mut d = String::new();
     write!(
@@ -1672,25 +2038,11 @@ fn entity_relation_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLin
     .unwrap();
     write!(
         d,
-        " L {} {}",
-        fmt_num(source_segment.x - min_x),
-        fmt_num(source_segment.y - min_y)
-    )
-    .unwrap();
-    write!(
-        d,
         " Q {} {} {} {}",
         fmt_num(control_in.x - min_x),
         fmt_num(control_in.y - min_y),
-        fmt_num(curve_start.x - min_x),
-        fmt_num(curve_start.y - min_y)
-    )
-    .unwrap();
-    write!(
-        d,
-        " L {} {}",
-        fmt_num(curve_end.x - min_x),
-        fmt_num(curve_end.y - min_y)
+        fmt_num(mid.x - min_x),
+        fmt_num(mid.y - min_y)
     )
     .unwrap();
     write!(
@@ -1698,13 +2050,6 @@ fn entity_relation_path(edge_path: &EdgePath, min_x: f64, min_y: f64) -> EdgeLin
         " Q {} {} {} {}",
         fmt_num(control_out.x - min_x),
         fmt_num(control_out.y - min_y),
-        fmt_num(target_segment.x - min_x),
-        fmt_num(target_segment.y - min_y)
-    )
-    .unwrap();
-    write!(
-        d,
-        " L {} {}",
         fmt_num(end.x - min_x),
         fmt_num(end.y - min_y)
     )
@@ -1813,12 +2158,15 @@ fn flex_arrow_metrics() -> FlexArrowMetrics {
 }
 
 fn flex_arrow_centerline(edge: &MxCell, edge_path: &EdgePath) -> Vec<Point> {
-    if edge_path.line_points.len() > 2 {
-        return edge_path.line_points.clone();
-    }
     let source = edge_path.source_anchor;
     let target = edge_path.target_anchor;
     let style = edge.style.as_deref();
+    if edge_path.line_points.len() > 2
+        && (style_value(style, "edgeStyle") != Some("orthogonalEdgeStyle")
+            || edge_path.line_points.len() != 3)
+    {
+        return edge_path.line_points.clone();
+    }
     match style_value(style, "edgeStyle") {
         Some("orthogonalEdgeStyle") => orthogonal_centerline(source, target),
         Some("isometricEdgeStyle") => {
@@ -2884,6 +3232,20 @@ fn parent_offset(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Point
     offset
 }
 
+fn is_ancestor(ancestor: &MxCell, node: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> bool {
+    let mut current = node;
+    while let Some(parent_id) = current.parent.as_ref() {
+        if parent_id == &ancestor.id {
+            return true;
+        }
+        let Some(parent) = cell_by_id.get(parent_id).copied() else {
+            break;
+        };
+        current = parent;
+    }
+    false
+}
+
 fn rect_intersection(center: Point, half_w: f64, half_h: f64, rotation: f64, dir: Point) -> Point {
     let angle = rotation.to_radians();
     let dir = normalize(dir);
@@ -2961,23 +3323,57 @@ fn render_vertex_label(vertex: &MxCell, x: f64, y: f64, width: f64, height: f64)
         return None;
     }
     let style = vertex.style.as_deref();
+    let vertical_label_bottom = style_value(style, "verticalLabelPosition") == Some("bottom");
     let vertical_text = style_value(style, "horizontal") == Some("0");
-    let label_width = if vertical_text {
-        (height - 2.0).max(0.0)
+    let spacing = style_value(style, "spacing")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let spacing_left = style_value(style, "spacingLeft")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(spacing / 2.0);
+    let spacing_right = style_value(style, "spacingRight")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(spacing / 2.0);
+    let label_width = if vertical_label_bottom {
+        1.0
+    } else if vertical_text {
+        (height - 2.0 - spacing_left - spacing_right).max(0.0)
     } else {
-        (width - 2.0).max(0.0)
+        (width - 2.0 - spacing_left - spacing_right).max(0.0)
     };
-    let (justify_content, text_align, margin_offset) = label_alignment(style);
-    let padding_top = label_padding_top(style, y, height);
-    let margin_left = if vertical_text {
-        x + margin_offset + (width - height) / 2.0
+    let (justify_content, text_align, margin_offset) = if vertical_label_bottom {
+        ("center", "center", 0.0)
     } else {
-        x + margin_offset
+        label_alignment(style)
+    };
+    let padding_top = if vertical_label_bottom {
+        y + height + 7.0
+    } else {
+        label_padding_top(style, y, height)
+    };
+    let margin_left = if vertical_label_bottom {
+        x + width / 2.0
+    } else if vertical_text {
+        x + margin_offset + spacing_left + (width - height) / 2.0
+    } else {
+        x + margin_offset + spacing_left
     };
     let bold = is_bold(style);
     let text = label_text(value, style);
     let (text_color, inner_color) = text_colors(style);
     let rotation = label_rotation_degrees(style);
+    let overflow_hidden = style_value(style, "overflow") == Some("hidden");
+    let overflow_style = if overflow_hidden {
+        let max_height = (height - 4.0).max(0.0);
+        format!(" max-height: {}px; overflow: hidden; ", fmt_num(max_height))
+    } else {
+        " ".to_string()
+    };
+    let white_space_style = if style_value(style, "whiteSpace") == Some("wrap") {
+        "white-space: normal; word-wrap: normal; ".to_string()
+    } else {
+        "white-space: nowrap; ".to_string()
+    };
     let (open, close) = if rotation.abs() > f64::EPSILON {
         let center_x = x + width / 2.0;
         let center_y = y + height / 2.0;
@@ -2998,21 +3394,91 @@ fn render_vertex_label(vertex: &MxCell, x: f64, y: f64, width: f64, height: f64)
     out.push_str(&open);
     write!(
         out,
-        "<foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe {}; justify-content: unsafe {}; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: {}; color: {}; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: {}; line-height: 1.2; pointer-events: all; {}white-space: normal; word-wrap: normal; \">{}</div></div></div></foreignObject>",
+        "<foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe {}; justify-content: unsafe {}; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: {};{}color: {}; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: {}; line-height: 1.2; pointer-events: all; {}{}\">{}</div></div></div></foreignObject>",
         label_align_items(style),
         justify_content,
         fmt_num(label_width),
         fmt_num(padding_top),
         fmt_num(margin_left),
         text_align,
+        overflow_style,
         text_color,
         inner_color,
         bold_style(bold),
+        white_space_style,
         text
     )
     .unwrap();
     out.push_str(&close);
     Some(out)
+}
+
+fn swimlane_start_size(style: Option<&str>) -> f64 {
+    style_value(style, "startSize")
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(12.0 + 11.0)
+}
+
+fn swimlane_title_bold(style: Option<&str>) -> bool {
+    if style_value(style, "fontStyle").is_some() {
+        is_bold(style)
+    } else {
+        true
+    }
+}
+
+fn render_swimlane_label(
+    vertex: &MxCell,
+    x: f64,
+    y: f64,
+    width: f64,
+    start_size: f64,
+) -> Option<(String, bool)> {
+    let value = vertex.value.as_deref()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let style = vertex.style.as_deref();
+    let text = label_text(value, style);
+    let bold = swimlane_title_bold(style);
+    let (text_color, inner_color) = text_colors(style);
+    let text_style = if style_value(style, "fontColor").is_some() {
+        inner_color.clone()
+    } else {
+        "light-dark(rgb(0, 0, 0), rgb(255, 255, 255))".to_string()
+    };
+    let label_width = (width - 2.0).max(0.0);
+    let padding_top = y + (start_size / 2.0).ceil();
+    let margin_left = x + 1.0;
+    if style_value(style, "html") == Some("1") {
+        let mut out = String::new();
+        write!(
+            out,
+            "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: {}; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: {}; line-height: 1.2; pointer-events: all; {}white-space: normal; word-wrap: normal; \">{}</div></div></div></foreignObject></g></g>",
+            fmt_num(label_width),
+            fmt_num(padding_top),
+            fmt_num(margin_left),
+            text_color,
+            inner_color,
+            bold_style(bold),
+            text
+        )
+        .unwrap();
+        return Some((out, true));
+    }
+    let text_x = x + width / 2.0;
+    let text_y = y + start_size - 5.0;
+    let font_weight = if bold { " font-weight=\"bold\"" } else { "" };
+    let out = format!(
+        "<g><g fill=\"{}\" font-family=\"Helvetica\" font-size=\"12px\"{} style=\"fill: {};\" text-anchor=\"middle\"><text x=\"{}\" y=\"{}\">{}</text></g></g>",
+        text_color,
+        font_weight,
+        text_style,
+        fmt_num(text_x),
+        fmt_num(text_y),
+        text
+    );
+    Some((out, false))
 }
 
 fn render_edge_value_label(
@@ -3221,6 +3687,18 @@ fn is_ellipse(style: Option<&str>) -> bool {
         .unwrap_or("")
         .split(';')
         .any(|entry| entry == "ellipse")
+}
+
+fn is_uml_actor(style: Option<&str>) -> bool {
+    style_value(style, "shape") == Some("umlActor")
+}
+
+fn is_swimlane(style: Option<&str>) -> bool {
+    style_has_flag(style, "swimlane")
+}
+
+fn is_partial_rectangle(style: Option<&str>) -> bool {
+    style_value(style, "shape") == Some("partialRectangle")
 }
 
 fn is_edge_label(style: Option<&str>) -> bool {
@@ -4169,6 +4647,20 @@ fn is_cell_visible(cell: &MxCell) -> bool {
         cell.extra.get("visible").map(String::as_str),
         Some("0") | Some("false")
     )
+}
+
+fn resolve_visible_terminal<'a>(
+    cell: &'a MxCell,
+    cell_by_id: &BTreeMap<String, &'a MxCell>,
+) -> Option<&'a MxCell> {
+    let mut current = cell;
+    loop {
+        if is_cell_visible(current) {
+            return Some(current);
+        }
+        let parent_id = current.parent.as_ref()?;
+        current = *cell_by_id.get(parent_id)?;
+    }
 }
 
 fn mark_visibility(

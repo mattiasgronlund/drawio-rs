@@ -75,6 +75,10 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
     let mut current_geometry_cell_idx: Option<usize> = None;
     let mut in_points_array: bool = false;
     let mut user_object_depth: usize = 0;
+    let mut current_user_object: Option<UserObjectContext> = None;
+    let mut current_cell_is_user_object: bool = false;
+    let mut current_geometry_cell_is_user_object: bool = false;
+    let mut order_index: usize = 0;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -82,9 +86,9 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                 let name = local_name_start(&e)?;
                 if is_user_object(&name) {
                     user_object_depth = user_object_depth.saturating_add(1);
-                    continue;
-                }
-                if user_object_depth > 0 {
+                    if user_object_depth == 1 {
+                        current_user_object = Some(parse_user_object_ctx(&e)?);
+                    }
                     continue;
                 }
                 match name.as_str() {
@@ -127,6 +131,7 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                             shadow: parse_bool_opt(attrs.get("shadow")),
                             extra: BTreeMap::new(),
                             root: Root { cells: Vec::new() },
+                            user_objects: Vec::new(),
                         };
 
                         // Preserve unknown attributes in extra
@@ -142,9 +147,27 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxCell outside mxGraphModel".into())
                         })?;
-                        let cell = parse_mxcell(&reader, &e)?;
-                        gm.root.cells.push(cell);
-                        current_cell_idx = Some(gm.root.cells.len() - 1);
+                        if user_object_depth > 0 {
+                            let ctx = current_user_object.as_ref();
+                            let mut cell = parse_mxcell_with_fallback(
+                                &reader,
+                                &e,
+                                ctx.and_then(|c| c.id.as_deref()),
+                                ctx.and_then(|c| c.label.as_deref()),
+                            )?;
+                            cell.order = order_index;
+                            order_index = order_index.saturating_add(1);
+                            gm.user_objects.push(cell);
+                            current_cell_idx = Some(gm.user_objects.len() - 1);
+                            current_cell_is_user_object = true;
+                        } else {
+                            let mut cell = parse_mxcell(&reader, &e)?;
+                            cell.order = order_index;
+                            order_index = order_index.saturating_add(1);
+                            gm.root.cells.push(cell);
+                            current_cell_idx = Some(gm.root.cells.len() - 1);
+                            current_cell_is_user_object = false;
+                        }
                     }
                     "mxGeometry" => {
                         let gm = current_graph.as_mut().ok_or_else(|| {
@@ -154,7 +177,13 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let idx = current_cell_idx.ok_or_else(|| {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
-                        gm.root.cells[idx].geometry = Some(geom);
+                        if current_cell_is_user_object {
+                            gm.user_objects[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = true;
+                        } else {
+                            gm.root.cells[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = false;
+                        }
                         current_geometry_cell_idx = Some(idx);
                     }
                     "Array" => {
@@ -170,7 +199,12 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxPoint outside mxGraphModel".into())
                         })?;
-                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                        let geom = if current_geometry_cell_is_user_object {
+                            gm.user_objects[idx].geometry.as_mut()
+                        } else {
+                            gm.root.cells[idx].geometry.as_mut()
+                        }
+                        .ok_or_else(|| {
                             ParseError::Structure("mxPoint found but no current mxGeometry".into())
                         })?;
                         let point = parse_mxpoint(&reader, &e)?;
@@ -183,9 +217,6 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
             Event::Empty(e) => {
                 let name = local_name_start(&e)?;
                 if is_user_object(&name) {
-                    continue;
-                }
-                if user_object_depth > 0 {
                     continue;
                 }
                 match name.as_str() {
@@ -207,8 +238,19 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxCell outside mxGraphModel".into())
                         })?;
-                        let cell = parse_mxcell(&reader, &e)?;
-                        gm.root.cells.push(cell);
+                        if user_object_depth > 0 {
+                            let ctx = current_user_object.as_ref();
+                            let cell = parse_mxcell_with_fallback(
+                                &reader,
+                                &e,
+                                ctx.and_then(|c| c.id.as_deref()),
+                                ctx.and_then(|c| c.label.as_deref()),
+                            )?;
+                            gm.user_objects.push(cell);
+                        } else {
+                            let cell = parse_mxcell(&reader, &e)?;
+                            gm.root.cells.push(cell);
+                        }
                         // empty cell can't have children like mxGeometry, so don't set current_cell_idx
                     }
                     "mxGeometry" => {
@@ -219,7 +261,13 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let idx = current_cell_idx.ok_or_else(|| {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
-                        gm.root.cells[idx].geometry = Some(geom);
+                        if current_cell_is_user_object {
+                            gm.user_objects[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = true;
+                        } else {
+                            gm.root.cells[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = false;
+                        }
                         current_geometry_cell_idx = Some(idx);
                     }
                     "mxPoint" => {
@@ -230,7 +278,12 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxPoint outside mxGraphModel".into())
                         })?;
-                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                        let geom = if current_geometry_cell_is_user_object {
+                            gm.user_objects[idx].geometry.as_mut()
+                        } else {
+                            gm.root.cells[idx].geometry.as_mut()
+                        }
+                        .ok_or_else(|| {
                             ParseError::Structure("mxPoint found but no current mxGeometry".into())
                         })?;
                         let point = parse_mxpoint(&reader, &e)?;
@@ -282,9 +335,9 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                 let name = local_name_end(&e)?;
                 if is_user_object(&name) {
                     user_object_depth = user_object_depth.saturating_sub(1);
-                    continue;
-                }
-                if user_object_depth > 0 {
+                    if user_object_depth == 0 {
+                        current_user_object = None;
+                    }
                     continue;
                 }
                 match name.as_str() {
@@ -309,9 +362,11 @@ pub fn parse_mxfile(xml: &str) -> ParseResult<MxFile> {
                     }
                     "mxCell" => {
                         current_cell_idx = None;
+                        current_cell_is_user_object = false;
                     }
                     "mxGeometry" => {
                         current_geometry_cell_idx = None;
+                        current_geometry_cell_is_user_object = false;
                         in_points_array = false;
                     }
                     "Array" => {
@@ -360,6 +415,9 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
     let mut current_geometry_cell_idx: Option<usize> = None;
     let mut in_points_array: bool = false;
     let mut user_object_depth: usize = 0;
+    let mut current_user_object: Option<UserObjectContext> = None;
+    let mut current_cell_is_user_object: bool = false;
+    let mut current_geometry_cell_is_user_object: bool = false;
 
     loop {
         match reader.read_event_into(&mut buf)? {
@@ -367,9 +425,9 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                 let name = local_name_start(&e)?;
                 if is_user_object(&name) {
                     user_object_depth = user_object_depth.saturating_add(1);
-                    continue;
-                }
-                if user_object_depth > 0 {
+                    if user_object_depth == 1 {
+                        current_user_object = Some(parse_user_object_ctx(&e)?);
+                    }
                     continue;
                 }
                 match name.as_str() {
@@ -399,6 +457,7 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                             shadow: parse_bool_opt(attrs.get("shadow")),
                             extra: BTreeMap::new(),
                             root: Root { cells: Vec::new() },
+                            user_objects: Vec::new(),
                         };
 
                         for (k, v) in attrs {
@@ -413,9 +472,23 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxCell outside mxGraphModel".into())
                         })?;
-                        let cell = parse_mxcell(&reader, &e)?;
-                        gm.root.cells.push(cell);
-                        current_cell_idx = Some(gm.root.cells.len() - 1);
+                        if user_object_depth > 0 {
+                            let ctx = current_user_object.as_ref();
+                            let cell = parse_mxcell_with_fallback(
+                                &reader,
+                                &e,
+                                ctx.and_then(|c| c.id.as_deref()),
+                                ctx.and_then(|c| c.label.as_deref()),
+                            )?;
+                            gm.user_objects.push(cell);
+                            current_cell_idx = Some(gm.user_objects.len() - 1);
+                            current_cell_is_user_object = true;
+                        } else {
+                            let cell = parse_mxcell(&reader, &e)?;
+                            gm.root.cells.push(cell);
+                            current_cell_idx = Some(gm.root.cells.len() - 1);
+                            current_cell_is_user_object = false;
+                        }
                     }
                     "mxGeometry" => {
                         let gm = current_graph.as_mut().ok_or_else(|| {
@@ -425,7 +498,13 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                         let idx = current_cell_idx.ok_or_else(|| {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
-                        gm.root.cells[idx].geometry = Some(geom);
+                        if current_cell_is_user_object {
+                            gm.user_objects[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = true;
+                        } else {
+                            gm.root.cells[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = false;
+                        }
                         current_geometry_cell_idx = Some(idx);
                     }
                     "Array" => {
@@ -441,7 +520,12 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxPoint outside mxGraphModel".into())
                         })?;
-                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                        let geom = if current_geometry_cell_is_user_object {
+                            gm.user_objects[idx].geometry.as_mut()
+                        } else {
+                            gm.root.cells[idx].geometry.as_mut()
+                        }
+                        .ok_or_else(|| {
                             ParseError::Structure("mxPoint found but no current mxGeometry".into())
                         })?;
                         let point = parse_mxpoint(&reader, &e)?;
@@ -456,16 +540,24 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                 if is_user_object(&name) {
                     continue;
                 }
-                if user_object_depth > 0 {
-                    continue;
-                }
                 match name.as_str() {
                     "mxCell" => {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxCell outside mxGraphModel".into())
                         })?;
-                        let cell = parse_mxcell(&reader, &e)?;
-                        gm.root.cells.push(cell);
+                        if user_object_depth > 0 {
+                            let ctx = current_user_object.as_ref();
+                            let cell = parse_mxcell_with_fallback(
+                                &reader,
+                                &e,
+                                ctx.and_then(|c| c.id.as_deref()),
+                                ctx.and_then(|c| c.label.as_deref()),
+                            )?;
+                            gm.user_objects.push(cell);
+                        } else {
+                            let cell = parse_mxcell(&reader, &e)?;
+                            gm.root.cells.push(cell);
+                        }
                     }
                     "mxGeometry" => {
                         let gm = current_graph.as_mut().ok_or_else(|| {
@@ -475,7 +567,13 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                         let idx = current_cell_idx.ok_or_else(|| {
                             ParseError::Structure("mxGeometry found but no current mxCell".into())
                         })?;
-                        gm.root.cells[idx].geometry = Some(geom);
+                        if current_cell_is_user_object {
+                            gm.user_objects[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = true;
+                        } else {
+                            gm.root.cells[idx].geometry = Some(geom);
+                            current_geometry_cell_is_user_object = false;
+                        }
                         current_geometry_cell_idx = Some(idx);
                     }
                     "Array" => {
@@ -491,7 +589,12 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                         let gm = current_graph.as_mut().ok_or_else(|| {
                             ParseError::Structure("mxPoint outside mxGraphModel".into())
                         })?;
-                        let geom = gm.root.cells[idx].geometry.as_mut().ok_or_else(|| {
+                        let geom = if current_geometry_cell_is_user_object {
+                            gm.user_objects[idx].geometry.as_mut()
+                        } else {
+                            gm.root.cells[idx].geometry.as_mut()
+                        }
+                        .ok_or_else(|| {
                             ParseError::Structure("mxPoint found but no current mxGeometry".into())
                         })?;
                         let point = parse_mxpoint(&reader, &e)?;
@@ -505,9 +608,9 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                 let name = local_name_end(&e)?;
                 if is_user_object(&name) {
                     user_object_depth = user_object_depth.saturating_sub(1);
-                    continue;
-                }
-                if user_object_depth > 0 {
+                    if user_object_depth == 0 {
+                        current_user_object = None;
+                    }
                     continue;
                 }
                 match name.as_str() {
@@ -518,9 +621,11 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
                     }
                     "mxCell" => {
                         current_cell_idx = None;
+                        current_cell_is_user_object = false;
                     }
                     "mxGeometry" => {
                         current_geometry_cell_idx = None;
+                        current_geometry_cell_is_user_object = false;
                         in_points_array = false;
                     }
                     "Array" => {
@@ -539,6 +644,20 @@ fn parse_graph_model(xml: &str) -> ParseResult<MxGraphModel> {
     Err(ParseError::Structure(
         "no <mxGraphModel> root element found".into(),
     ))
+}
+
+#[derive(Debug, Clone)]
+struct UserObjectContext {
+    id: Option<String>,
+    label: Option<String>,
+}
+
+fn parse_user_object_ctx(e: &BytesStart<'_>) -> ParseResult<UserObjectContext> {
+    let attrs = attrs_to_map(e)?;
+    Ok(UserObjectContext {
+        id: attrs.get("id").cloned(),
+        label: attrs.get("label").cloned(),
+    })
 }
 
 fn parse_mxcell<R: BufRead>(_reader: &Reader<R>, e: &BytesStart<'_>) -> ParseResult<MxCell> {
@@ -566,6 +685,45 @@ fn parse_mxcell<R: BufRead>(_reader: &Reader<R>, e: &BytesStart<'_>) -> ParseRes
         edge: parse_bool_opt(attrs.get("edge")),
         extra,
         geometry: None,
+        order: 0,
+    })
+}
+
+fn parse_mxcell_with_fallback<R: BufRead>(
+    _reader: &Reader<R>,
+    e: &BytesStart<'_>,
+    fallback_id: Option<&str>,
+    fallback_value: Option<&str>,
+) -> ParseResult<MxCell> {
+    let attrs = attrs_to_map(e)?;
+    let id = attrs
+        .get("id")
+        .cloned()
+        .or_else(|| fallback_id.map(|value| value.to_string()))
+        .ok_or(ParseError::MissingAttr("mxCell@id"))?;
+
+    let mut extra = BTreeMap::new();
+    for (k, v) in &attrs {
+        if !is_known_cell_attr(k) {
+            extra.insert(k.clone(), v.clone());
+        }
+    }
+
+    Ok(MxCell {
+        id,
+        parent: attrs.get("parent").cloned(),
+        source: attrs.get("source").cloned(),
+        target: attrs.get("target").cloned(),
+        value: attrs
+            .get("value")
+            .cloned()
+            .or_else(|| fallback_value.map(|value| value.to_string())),
+        style: attrs.get("style").cloned(),
+        vertex: parse_bool_opt(attrs.get("vertex")),
+        edge: parse_bool_opt(attrs.get("edge")),
+        extra,
+        geometry: None,
+        order: 0,
     })
 }
 
