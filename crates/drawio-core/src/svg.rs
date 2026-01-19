@@ -25,12 +25,41 @@ pub enum SvgError {
 
 pub type SvgResult<T> = Result<T, SvgError>;
 
+const ROOT_KEY: &str = "__root__";
+
 pub fn generate_svg(mxfile: &MxFile, diagram_index: usize) -> SvgResult<String> {
     let diagram = mxfile
         .diagrams
         .get(diagram_index)
         .ok_or(SvgError::MissingDiagram(diagram_index))?;
     generate_svg_for_diagram(diagram)
+}
+
+#[cfg(feature = "edge-debug")]
+pub fn debug_render_tree(mxfile: &MxFile, diagram_index: usize) -> SvgResult<String> {
+    let diagram = mxfile
+        .diagrams
+        .get(diagram_index)
+        .ok_or(SvgError::MissingDiagram(diagram_index))?;
+    let graph = diagram
+        .graph_model
+        .as_ref()
+        .ok_or(SvgError::MissingGraphModel)?;
+    let mut children_by_parent: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
+    for cell in &graph.root.cells {
+        let parent_key = cell.parent.clone().unwrap_or_else(|| ROOT_KEY.to_string());
+        children_by_parent.entry(parent_key).or_default().push(cell);
+    }
+    let mut visible_by_id: BTreeMap<String, bool> = BTreeMap::new();
+    mark_visibility(ROOT_KEY, true, &children_by_parent, &mut visible_by_id);
+
+    let ctx = RenderTreeCtx {
+        children_by_parent: &children_by_parent,
+        visible_by_id: &visible_by_id,
+    };
+    let mut out = String::new();
+    render_tree(ROOT_KEY, 0, &ctx, &mut out);
+    Ok(out)
 }
 
 pub fn generate_svg_to_path<P: AsRef<Path>>(
@@ -48,20 +77,36 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
         .graph_model
         .as_ref()
         .ok_or(SvgError::MissingGraphModel)?;
+    let mut cell_by_id = BTreeMap::new();
+    let mut children_by_parent: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
+    for cell in &graph.root.cells {
+        cell_by_id.insert(cell.id.clone(), cell);
+        let parent_key = cell.parent.clone().unwrap_or_else(|| ROOT_KEY.to_string());
+        children_by_parent.entry(parent_key).or_default().push(cell);
+    }
+
+    let mut visible_by_id: BTreeMap<String, bool> = BTreeMap::new();
+    mark_visibility(ROOT_KEY, true, &children_by_parent, &mut visible_by_id);
+
     let mut vertices = Vec::new();
     let mut edges = Vec::new();
     let mut edge_labels: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
-    let mut cell_by_id = BTreeMap::new();
-
     for cell in &graph.root.cells {
-        cell_by_id.insert(cell.id.clone(), cell);
+        if !visible_by_id.get(&cell.id).copied().unwrap_or(true) {
+            continue;
+        }
         if cell.edge == Some(true) {
             edges.push(cell);
         } else if cell.vertex == Some(true) {
             if is_edge_label(cell.style.as_deref()) {
-                if let Some(parent) = cell.parent.as_ref() {
+                if let Some(parent) = cell.parent.as_ref()
+                    && visible_by_id.get(parent).copied().unwrap_or(true)
+                {
                     edge_labels.entry(parent.clone()).or_default().push(cell);
                 }
+                continue;
+            }
+            if is_group_cell(cell) {
                 continue;
             }
             vertices.push(cell);
@@ -115,12 +160,90 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
     }
 
     let mut requires_extensibility = false;
-    out.push_str("<g><g data-cell-id=\"0\"><g data-cell-id=\"1\">");
-    for cell in &graph.root.cells {
+    out.push_str("<g>");
+    render_cells_recursive(
+        ROOT_KEY,
+        &mut out,
+        &children_by_parent,
+        &visible_by_id,
+        &cell_by_id,
+        &edge_labels,
+        &gradient_fill_by_id,
+        min_x,
+        min_y,
+        &mut requires_extensibility,
+    )?;
+    out.push_str("</g>");
+    if requires_extensibility {
+        out.push_str(WARNING_SWITCH);
+    }
+    out.push_str("</svg>");
+    Ok(out)
+}
+
+#[cfg(feature = "edge-debug")]
+struct RenderTreeCtx<'a> {
+    children_by_parent: &'a BTreeMap<String, Vec<&'a MxCell>>,
+    visible_by_id: &'a BTreeMap<String, bool>,
+}
+
+#[cfg(feature = "edge-debug")]
+fn render_tree(parent_key: &str, depth: usize, ctx: &RenderTreeCtx<'_>, out: &mut String) {
+    let Some(children) = ctx.children_by_parent.get(parent_key) else {
+        return;
+    };
+    for cell in children {
+        let visible = ctx.visible_by_id.get(&cell.id).copied().unwrap_or(true);
+        let kind = cell_kind(cell);
+        let value = cell.value.as_deref().unwrap_or("");
+        let indent = "  ".repeat(depth);
+        let _ = writeln!(
+            out,
+            "{indent}- id={} kind={} visible={} value=\"{}\"",
+            cell.id, kind, visible, value
+        );
+        render_tree(cell.id.as_str(), depth + 1, ctx, out);
+    }
+}
+
+#[cfg(feature = "edge-debug")]
+fn cell_kind(cell: &MxCell) -> &'static str {
+    if is_group_cell(cell) {
+        return "group";
+    }
+    if cell.edge == Some(true) {
+        return "edge";
+    }
+    if cell.vertex == Some(true) {
+        return "vertex";
+    }
+    "layer"
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_cells_recursive(
+    parent_key: &str,
+    out: &mut String,
+    children_by_parent: &BTreeMap<String, Vec<&MxCell>>,
+    visible_by_id: &BTreeMap<String, bool>,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+    edge_labels: &BTreeMap<String, Vec<&MxCell>>,
+    gradient_fill_by_id: &BTreeMap<String, String>,
+    min_x: f64,
+    min_y: f64,
+    requires_extensibility: &mut bool,
+) -> SvgResult<()> {
+    let Some(children) = children_by_parent.get(parent_key) else {
+        return Ok(());
+    };
+    for cell in children {
+        if !visible_by_id.get(&cell.id).copied().unwrap_or(true) {
+            continue;
+        }
         if cell.edge == Some(true) {
             let edge_label_cells = edge_labels.get(&cell.id).map(Vec::as_slice).unwrap_or(&[]);
             if let Some(edge_render) =
-                render_edge(cell, &cell_by_id, min_x, min_y, edge_label_cells)?
+                render_edge(cell, cell_by_id, min_x, min_y, edge_label_cells)?
             {
                 let transform = edge_transform(cell.style.as_deref());
                 match transform {
@@ -143,136 +266,174 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
                 }
                 for label in edge_render.labels {
                     out.push_str(&label);
-                    requires_extensibility = true;
+                    *requires_extensibility = true;
                 }
                 out.push_str("</g>");
             }
             continue;
         }
-        if cell.vertex != Some(true) {
-            continue;
-        }
-        if is_edge_label(cell.style.as_deref()) {
-            continue;
-        }
-        let geometry = cell
-            .geometry
-            .as_ref()
-            .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
-        let width = geometry.width.unwrap_or(0.0);
-        let height = geometry.height.unwrap_or(0.0);
-        let top_left = vertex_top_left(cell, &cell_by_id)?;
-        let x = top_left.x - min_x;
-        let y = top_left.y - min_y;
-        let style = cell.style.as_deref();
-        let dash_attr = if is_dashed(style) {
-            " stroke-dasharray=\"3 3\""
-        } else {
-            ""
-        };
-        let stroke_width_attr = stroke_width_attr(style);
-        let gradient_fill = gradient_fill_by_id.get(&cell.id).map(|id| id.as_str());
-        let (fill_attr, stroke_attr, style_attr) = shape_paint_attrs(style, gradient_fill);
-        let rotation_attr = shape_rotation_attr(style, x, y, width, height);
-        let transform = vertex_transform(style);
-        let (open, close) = match transform {
-            Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
-            None => ("<g>".to_string(), "</g>".to_string()),
-        };
-        if style_value(style, "shape") == Some("message") {
-            let (edge_stroke, edge_style_attr) = edge_stroke_attrs(style);
-            write!(
-                out,
-                "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} /><path d=\"M {} {} L {} {} L {} {}\" fill=\"none\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
-                cell.id,
-                open,
-                fmt_num(x),
-                fmt_num(y),
-                fmt_num(x + width),
-                fmt_num(y),
-                fmt_num(x + width),
-                fmt_num(y + height),
-                fmt_num(x),
-                fmt_num(y + height),
-                fill_attr,
-                stroke_attr,
-                dash_attr,
-                stroke_width_attr,
-                style_attr,
-                rotation_attr,
-                fmt_num(x),
-                fmt_num(y),
-                fmt_num(x + width / 2.0),
-                fmt_num(y + height / 2.0),
-                fmt_num(x + width),
-                fmt_num(y),
-                edge_stroke,
-                dash_attr,
-                stroke_width_attr,
-                edge_style_attr,
-                rotation_attr,
-                close
-            )
-            .unwrap();
-        } else if is_ellipse(style) {
-            write!(
-                out,
-                "<g data-cell-id=\"{}\">{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
-                cell.id,
-                open,
-                fmt_num(x + width / 2.0),
-                fmt_num(y + height / 2.0),
-                fmt_num(width / 2.0),
-                fmt_num(height / 2.0),
-                fill_attr,
-                stroke_attr,
-                dash_attr,
-                stroke_width_attr,
-                style_attr,
-                rotation_attr,
-                close
-            )
-            .unwrap();
-        } else {
-            let rounding = if is_rounded(style) {
-                let radius = (width.min(height) * 0.15).clamp(3.0, 10.0);
-                format!(" rx=\"{}\" ry=\"{}\"", fmt_num(radius), fmt_num(radius))
+        if cell.vertex == Some(true) {
+            if is_edge_label(cell.style.as_deref()) {
+                continue;
+            }
+            if is_group_cell(cell) {
+                let transform = vertex_transform(cell.style.as_deref());
+                match transform {
+                    Some(value) => {
+                        write!(
+                            out,
+                            "<g data-cell-id=\"{}\"><g transform=\"{}\"></g>",
+                            cell.id, value
+                        )
+                        .unwrap();
+                    }
+                    None => {
+                        write!(out, "<g data-cell-id=\"{}\"><g></g>", cell.id).unwrap();
+                    }
+                }
+                render_cells_recursive(
+                    cell.id.as_str(),
+                    out,
+                    children_by_parent,
+                    visible_by_id,
+                    cell_by_id,
+                    edge_labels,
+                    gradient_fill_by_id,
+                    min_x,
+                    min_y,
+                    requires_extensibility,
+                )?;
+                out.push_str("</g>");
+                continue;
+            }
+            let geometry = cell
+                .geometry
+                .as_ref()
+                .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
+            let width = geometry.width.unwrap_or(0.0);
+            let height = geometry.height.unwrap_or(0.0);
+            let top_left = vertex_top_left(cell, cell_by_id)?;
+            let x = top_left.x - min_x;
+            let y = top_left.y - min_y;
+            let style = cell.style.as_deref();
+            let dash_attr = if is_dashed(style) {
+                " stroke-dasharray=\"3 3\""
             } else {
-                String::new()
+                ""
             };
-            write!(
-                out,
-                "<g data-cell-id=\"{}\">{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{}{} />{}",
-                cell.id,
-                open,
-                fmt_num(x),
-                fmt_num(y),
-                fmt_num(width),
-                fmt_num(height),
-                fill_attr,
-                stroke_attr,
-                dash_attr,
-                stroke_width_attr,
-                style_attr,
-                rounding,
-                rotation_attr,
-                close
-            )
-            .unwrap();
+            let stroke_width_attr = stroke_width_attr(style);
+            let gradient_fill = gradient_fill_by_id.get(&cell.id).map(|id| id.as_str());
+            let (fill_attr, stroke_attr, style_attr) = shape_paint_attrs(style, gradient_fill);
+            let rotation_attr = shape_rotation_attr(style, x, y, width, height);
+            let transform = vertex_transform(style);
+            let (open, close) = match transform {
+                Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
+                None => ("<g>".to_string(), "</g>".to_string()),
+            };
+            if style_value(style, "shape") == Some("message") {
+                let (edge_stroke, edge_style_attr) = edge_stroke_attrs(style);
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} /><path d=\"M {} {} L {} {} L {} {}\" fill=\"none\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(x + width),
+                    fmt_num(y),
+                    fmt_num(x + width),
+                    fmt_num(y + height),
+                    fmt_num(x),
+                    fmt_num(y + height),
+                    fill_attr,
+                    stroke_attr,
+                    dash_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(x + width / 2.0),
+                    fmt_num(y + height / 2.0),
+                    fmt_num(x + width),
+                    fmt_num(y),
+                    edge_stroke,
+                    dash_attr,
+                    stroke_width_attr,
+                    edge_style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            } else if is_ellipse(style) {
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x + width / 2.0),
+                    fmt_num(y + height / 2.0),
+                    fmt_num(width / 2.0),
+                    fmt_num(height / 2.0),
+                    fill_attr,
+                    stroke_attr,
+                    dash_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            } else {
+                let rounding = if is_rounded(style) {
+                    let radius = (width.min(height) * 0.15).clamp(3.0, 10.0);
+                    format!(" rx=\"{}\" ry=\"{}\"", fmt_num(radius), fmt_num(radius))
+                } else {
+                    String::new()
+                };
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" fill=\"{}\" stroke=\"{}\" pointer-events=\"all\"{}{}{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(width),
+                    fmt_num(height),
+                    fill_attr,
+                    stroke_attr,
+                    dash_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rounding,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            }
+            if let Some(label) = render_vertex_label(cell, x, y, width, height) {
+                out.push_str(&label);
+                *requires_extensibility = true;
+            }
+            out.push_str("</g>");
+            continue;
         }
-        if let Some(label) = render_vertex_label(cell, x, y, width, height) {
-            out.push_str(&label);
-            requires_extensibility = true;
-        }
+        write!(out, "<g data-cell-id=\"{}\">", cell.id).unwrap();
+        render_cells_recursive(
+            cell.id.as_str(),
+            out,
+            children_by_parent,
+            visible_by_id,
+            cell_by_id,
+            edge_labels,
+            gradient_fill_by_id,
+            min_x,
+            min_y,
+            requires_extensibility,
+        )?;
         out.push_str("</g>");
     }
-
-    out.push_str("</g></g></g>");
-    if requires_extensibility {
-        out.push_str(WARNING_SWITCH);
-    }
-    out.push_str("</svg>");
-    Ok(out)
+    Ok(())
 }
 
 fn bounds_for_graph(
@@ -855,20 +1016,22 @@ fn edge_path_absolute(
     if source_point.is_none()
         && let Some(source_cell) = source
     {
-        if let Some(point) = terminal_point_override(edge.style.as_deref(), source_cell, true)? {
+        if let Some(point) =
+            terminal_point_override(edge.style.as_deref(), source_cell, true, cell_by_id)?
+        {
             source_point = Some(point);
         } else {
             let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
                 == Some("orthogonalEdgeStyle")
                 && !is_ellipse(source_cell.style.as_deref());
-            let source_center = cell_center(source_cell)?;
+            let source_center = cell_center(source_cell, cell_by_id)?;
             let target_dir = if let Some(first) = control_points.first() {
                 Point {
                     x: first.x - source_center.x,
                     y: first.y - source_center.y,
                 }
             } else if let Some(target_cell) = target {
-                let target_center = cell_center(target_cell)?;
+                let target_center = cell_center(target_cell, cell_by_id)?;
                 Point {
                     x: target_center.x - source_center.x,
                     y: target_center.y - source_center.y,
@@ -878,9 +1041,9 @@ fn edge_path_absolute(
             };
             let spacing = perimeter_spacing(source_cell.style.as_deref());
             source_point = Some(if use_orthogonal_terminal {
-                orthogonal_terminal_point_for_cell(source_cell, target_dir, spacing)?
+                orthogonal_terminal_point_for_cell(source_cell, target_dir, spacing, cell_by_id)?
             } else {
-                terminal_point_for_cell(source_cell, target_dir, spacing)?
+                terminal_point_for_cell(source_cell, target_dir, spacing, cell_by_id)?
             });
         }
     }
@@ -888,20 +1051,27 @@ fn edge_path_absolute(
     if target_point.is_none()
         && let Some(target_cell) = target
     {
-        if let Some(point) = terminal_point_override(edge.style.as_deref(), target_cell, false)? {
+        if let Some(point) =
+            terminal_point_override(edge.style.as_deref(), target_cell, false, cell_by_id)?
+        {
             target_point = Some(point);
         } else {
             let use_orthogonal_terminal = style_value(edge.style.as_deref(), "edgeStyle")
                 == Some("orthogonalEdgeStyle")
                 && !is_ellipse(target_cell.style.as_deref());
-            let target_center = cell_center(target_cell)?;
+            let target_center = cell_center(target_cell, cell_by_id)?;
             let source_dir = if let Some(last) = control_points.last() {
                 Point {
                     x: last.x - target_center.x,
                     y: last.y - target_center.y,
                 }
+            } else if let Some(source_anchor) = source_point {
+                Point {
+                    x: source_anchor.x - target_center.x,
+                    y: source_anchor.y - target_center.y,
+                }
             } else if let Some(source_cell) = source {
-                let source_center = cell_center(source_cell)?;
+                let source_center = cell_center(source_cell, cell_by_id)?;
                 Point {
                     x: source_center.x - target_center.x,
                     y: source_center.y - target_center.y,
@@ -910,9 +1080,9 @@ fn edge_path_absolute(
                 Point { x: -1.0, y: 0.0 }
             };
             target_point = Some(if use_orthogonal_terminal {
-                orthogonal_terminal_point_for_cell(target_cell, source_dir, 0.0)?
+                orthogonal_terminal_point_for_cell(target_cell, source_dir, 0.0, cell_by_id)?
             } else {
-                terminal_point_for_cell(target_cell, source_dir, 0.0)?
+                terminal_point_for_cell(target_cell, source_dir, 0.0, cell_by_id)?
             });
         }
     }
@@ -980,13 +1150,14 @@ fn edge_path_absolute(
     }))
 }
 
-fn cell_center(cell: &MxCell) -> SvgResult<Point> {
+fn cell_center(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> SvgResult<Point> {
     let geometry = cell
         .geometry
         .as_ref()
         .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
-    let x = geometry.x.unwrap_or(0.0);
-    let y = geometry.y.unwrap_or(0.0);
+    let offset = parent_offset(cell, cell_by_id);
+    let x = geometry.x.unwrap_or(0.0) + offset.x;
+    let y = geometry.y.unwrap_or(0.0) + offset.y;
     let width = geometry.width.unwrap_or(0.0);
     let height = geometry.height.unwrap_or(0.0);
     Ok(Point {
@@ -995,13 +1166,19 @@ fn cell_center(cell: &MxCell) -> SvgResult<Point> {
     })
 }
 
-fn terminal_point_for_cell(cell: &MxCell, direction: Point, spacing: f64) -> SvgResult<Point> {
+fn terminal_point_for_cell(
+    cell: &MxCell,
+    direction: Point,
+    spacing: f64,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+) -> SvgResult<Point> {
     let geometry = cell
         .geometry
         .as_ref()
         .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
-    let x = geometry.x.unwrap_or(0.0);
-    let y = geometry.y.unwrap_or(0.0);
+    let offset = parent_offset(cell, cell_by_id);
+    let x = geometry.x.unwrap_or(0.0) + offset.x;
+    let y = geometry.y.unwrap_or(0.0) + offset.y;
     let width = geometry.width.unwrap_or(0.0);
     let height = geometry.height.unwrap_or(0.0);
     let rotation = rotation_degrees(cell.style.as_deref());
@@ -1026,13 +1203,15 @@ fn orthogonal_terminal_point_for_cell(
     cell: &MxCell,
     direction: Point,
     spacing: f64,
+    cell_by_id: &BTreeMap<String, &MxCell>,
 ) -> SvgResult<Point> {
     let geometry = cell
         .geometry
         .as_ref()
         .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
-    let x = geometry.x.unwrap_or(0.0);
-    let y = geometry.y.unwrap_or(0.0);
+    let offset = parent_offset(cell, cell_by_id);
+    let x = geometry.x.unwrap_or(0.0) + offset.x;
+    let y = geometry.y.unwrap_or(0.0) + offset.y;
     let width = geometry.width.unwrap_or(0.0);
     let height = geometry.height.unwrap_or(0.0);
     let center = Point {
@@ -1090,6 +1269,7 @@ fn terminal_point_override(
     edge_style: Option<&str>,
     cell: &MxCell,
     is_source: bool,
+    cell_by_id: &BTreeMap<String, &MxCell>,
 ) -> SvgResult<Option<Point>> {
     let geometry = cell
         .geometry
@@ -1110,8 +1290,9 @@ fn terminal_point_override(
     let (Some(rel_x), Some(rel_y)) = (rel_x, rel_y) else {
         return Ok(None);
     };
-    let x = geometry.x.unwrap_or(0.0);
-    let y = geometry.y.unwrap_or(0.0);
+    let offset = parent_offset(cell, cell_by_id);
+    let x = geometry.x.unwrap_or(0.0) + offset.x;
+    let y = geometry.y.unwrap_or(0.0) + offset.y;
     let width = geometry.width.unwrap_or(0.0);
     let height = geometry.height.unwrap_or(0.0);
     let rotation = rotation_degrees(cell.style.as_deref());
@@ -1211,7 +1392,19 @@ fn normalize(point: Point) -> Point {
 
 fn dash_pattern_attr(style: Option<&str>) -> String {
     if let Some(pattern) = style_value(style, "dashPattern") {
-        return format!(" stroke-dasharray=\"{pattern}\"");
+        let scale = stroke_width_value(style);
+        if (scale - 1.0).abs() <= f64::EPSILON {
+            return format!(" stroke-dasharray=\"{pattern}\"");
+        }
+        let mut parts = Vec::new();
+        for part in pattern.split_whitespace() {
+            if let Ok(value) = part.parse::<f64>() {
+                parts.push(fmt_num(value * scale));
+            } else {
+                parts.push(part.to_string());
+            }
+        }
+        return format!(" stroke-dasharray=\"{}\"", parts.join(" "));
     }
     if is_dashed(style) {
         return " stroke-dasharray=\"3 3\"".to_string();
@@ -2665,10 +2858,30 @@ fn vertex_top_left(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Svg
             });
         }
     }
+    let offset = parent_offset(cell, cell_by_id);
     Ok(Point {
-        x: geometry.x.unwrap_or(0.0),
-        y: geometry.y.unwrap_or(0.0),
+        x: geometry.x.unwrap_or(0.0) + offset.x,
+        y: geometry.y.unwrap_or(0.0) + offset.y,
     })
+}
+
+fn parent_offset(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Point {
+    let mut offset = Point { x: 0.0, y: 0.0 };
+    let mut current = cell;
+    while let Some(parent_id) = current.parent.as_ref() {
+        let Some(parent) = cell_by_id.get(parent_id) else {
+            break;
+        };
+        if parent.vertex == Some(true)
+            && parent.edge != Some(true)
+            && let Some(geometry) = parent.geometry.as_ref()
+        {
+            offset.x += geometry.x.unwrap_or(0.0);
+            offset.y += geometry.y.unwrap_or(0.0);
+        }
+        current = parent;
+    }
+    offset
 }
 
 fn rect_intersection(center: Point, half_w: f64, half_h: f64, rotation: f64, dir: Point) -> Point {
@@ -3938,6 +4151,45 @@ fn edge_transform(style: Option<&str>) -> Option<&'static str> {
         None
     } else {
         Some("translate(0.5,0.5)")
+    }
+}
+
+fn style_has_flag(style: Option<&str>, flag: &str) -> bool {
+    style
+        .map(|value| value.split(';').any(|part| part == flag))
+        .unwrap_or(false)
+}
+
+fn is_group_cell(cell: &MxCell) -> bool {
+    cell.vertex == Some(true) && style_has_flag(cell.style.as_deref(), "group")
+}
+
+fn is_cell_visible(cell: &MxCell) -> bool {
+    !matches!(
+        cell.extra.get("visible").map(String::as_str),
+        Some("0") | Some("false")
+    )
+}
+
+fn mark_visibility(
+    parent_key: &str,
+    parent_visible: bool,
+    children_by_parent: &BTreeMap<String, Vec<&MxCell>>,
+    visible_by_id: &mut BTreeMap<String, bool>,
+) {
+    let Some(children) = children_by_parent.get(parent_key) else {
+        return;
+    };
+    for child in children {
+        let own_visible = is_cell_visible(child);
+        let effective = parent_visible && own_visible;
+        visible_by_id.insert(child.id.clone(), effective);
+        mark_visibility(
+            child.id.as_str(),
+            effective,
+            children_by_parent,
+            visible_by_id,
+        );
     }
 }
 
