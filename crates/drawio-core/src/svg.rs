@@ -337,10 +337,21 @@ fn render_cells_recursive(
             let (fill_attr, stroke_attr, style_attr) = shape_paint_attrs(style, gradient_fill);
             let (_, stroke_style_attr) = edge_stroke_attrs(style);
             let rotation_attr = shape_rotation_attr(style, x, y, width, height);
+            let shape = style_value(style, "shape");
+            let image_value = if shape == Some("image") {
+                style_value(style, "image")
+            } else {
+                None
+            };
+            let is_image = image_value.is_some();
             let transform = vertex_transform(style);
-            let (open, close) = match transform {
-                Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
-                None => ("<g>".to_string(), "</g>".to_string()),
+            let (open, close) = if is_image {
+                ("<g>".to_string(), "</g>".to_string())
+            } else {
+                match transform {
+                    Some(value) => (format!("<g transform=\"{}\">", value), "</g>".to_string()),
+                    None => ("<g>".to_string(), "</g>".to_string()),
+                }
             };
             if is_swimlane(style) {
                 let start_size = swimlane_start_size(style);
@@ -515,6 +526,31 @@ fn render_cells_recursive(
                     close
                 )
                 .unwrap();
+            } else if is_image {
+                let href = normalize_image_href(
+                    image_value.expect("image_value is Some when is_image is true"),
+                );
+                let preserve = if style_value(style, "imageAspect") == Some("0") {
+                    "none"
+                } else {
+                    "xMidYMid meet"
+                };
+                let rotation_attr = image_rotation_attr(style, x, y, width, height);
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<image x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" xlink:href=\"{}\" preserveAspectRatio=\"{}\"{}></image>{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(width),
+                    fmt_num(height),
+                    href,
+                    preserve,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
             } else if is_ellipse(style) {
                 write!(
                     out,
@@ -620,6 +656,11 @@ fn bounds_for_graph(
     if vertices.is_empty() && edges.is_empty() {
         return Ok((0.0, 0.0, 0.0, 0.0));
     }
+    let has_image = vertices.iter().any(|vertex| {
+        let style = vertex.style.as_deref();
+        style_value(style, "shape") == Some("image") && style_value(style, "image").is_some()
+    });
+
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
@@ -635,10 +676,13 @@ fn bounds_for_graph(
         let y = top_left.y;
         let width = geometry.width.unwrap_or(0.0);
         let height = geometry.height.unwrap_or(0.0);
-        let stroke_width = stroke_width_value(vertex.style.as_deref());
+        let style = vertex.style.as_deref();
+        let stroke_width = stroke_width_value(style);
         let half = (stroke_width / 2.0).floor();
-        let rotation = rotation_degrees(vertex.style.as_deref());
-        let bbox = if rotation.abs() > f64::EPSILON {
+        let rotation = rotation_degrees(style);
+        let is_image =
+            style_value(style, "shape") == Some("image") && style_value(style, "image").is_some();
+        let mut bbox = if rotation.abs() > f64::EPSILON {
             rotated_bbox(x, y, width, height, rotation)
         } else {
             BBox {
@@ -648,6 +692,15 @@ fn bounds_for_graph(
                 max_y: y + height,
             }
         };
+        if is_image {
+            bbox.min_x = bbox.min_x.ceil();
+            bbox.min_y = bbox.min_y.ceil();
+        } else if has_image && vertex_transform(style).is_some() {
+            bbox.min_x += 0.5;
+            bbox.min_y += 0.5;
+            bbox.max_x += 0.5;
+            bbox.max_y += 0.5;
+        }
         min_x = min_x.min(bbox.min_x - half);
         min_y = min_y.min(bbox.min_y - half);
         max_x = max_x.max(bbox.max_x + half);
@@ -4005,6 +4058,10 @@ fn render_marker(
     filled: bool,
     ctx: &MarkerContext<'_>,
 ) -> String {
+    let dir = Point {
+        x: (dir.x * 1000.0).round() / 1000.0,
+        y: (dir.y * 1000.0).round() / 1000.0,
+    };
     let perp = Point {
         x: -dir.y,
         y: dir.x,
@@ -4718,6 +4775,21 @@ fn shape_rotation_attr(style: Option<&str>, x: f64, y: f64, width: f64, height: 
     )
 }
 
+fn image_rotation_attr(style: Option<&str>, x: f64, y: f64, width: f64, height: f64) -> String {
+    let rotation = rotation_degrees(style);
+    if rotation.abs() <= f64::EPSILON {
+        return String::new();
+    }
+    let center_x = x + width / 2.0;
+    let center_y = y + height / 2.0;
+    format!(
+        " transform=\"rotate({},{},{})\"",
+        fmt_num(rotation),
+        fmt_num(center_x),
+        fmt_num(center_y)
+    )
+}
+
 fn rotated_bbox(x: f64, y: f64, width: f64, height: f64, rotation: f64) -> BBox {
     let center_x = x + width / 2.0;
     let center_y = y + height / 2.0;
@@ -5070,6 +5142,18 @@ fn style_value<'a>(style: Option<&'a str>, key: &str) -> Option<&'a str> {
         let (k, v) = entry.split_once('=')?;
         if k == key { Some(v) } else { None }
     })
+}
+
+fn normalize_image_href(value: &str) -> String {
+    if value.starts_with("data:") {
+        if value.contains(";base64,") {
+            return value.to_string();
+        }
+        if let Some((prefix, data)) = value.split_once(',') {
+            return format!("{prefix};base64,{data}");
+        }
+    }
+    value.to_string()
 }
 
 fn escape_html(input: &str) -> String {
