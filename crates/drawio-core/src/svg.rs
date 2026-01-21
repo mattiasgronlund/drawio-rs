@@ -114,6 +114,8 @@ fn generate_svg_for_diagram(diagram: &Diagram) -> SvgResult<String> {
     }
 
     let (min_x, min_y, width, height) = bounds_for_graph(&vertices, &edges, &cell_by_id)?;
+    let min_x = snap_coord(min_x);
+    let min_y = snap_coord(min_y);
     let mut out = String::new();
     let (svg_width, svg_height, view_width, view_height) =
         if vertices.is_empty() && edges.is_empty() {
@@ -324,8 +326,11 @@ fn render_cells_recursive(
             let width = geometry.width.unwrap_or(0.0);
             let height = geometry.height.unwrap_or(0.0);
             let top_left = vertex_top_left(cell, cell_by_id)?;
+            let raw_top_left = vertex_top_left_raw(cell, cell_by_id)?;
             let x = top_left.x - min_x;
             let y = top_left.y - min_y;
+            let raw_x = raw_top_left.x - min_x;
+            let raw_y = raw_top_left.y - min_y;
             let style = cell.style.as_deref();
             let dash_attr = if is_dashed(style) {
                 " stroke-dasharray=\"3 3\""
@@ -355,48 +360,94 @@ fn render_cells_recursive(
             };
             if is_swimlane(style) {
                 let start_size = swimlane_start_size(style);
-                let header_y = y + start_size;
-                write!(
-                    out,
-                    "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
-                    cell.id,
-                    open,
-                    fmt_num(x),
-                    fmt_num(header_y),
-                    fmt_num(x),
-                    fmt_num(y),
-                    fmt_num(x + width),
-                    fmt_num(y),
-                    fmt_num(x + width),
-                    fmt_num(header_y),
-                    fill_attr,
-                    stroke_attr,
-                    stroke_width_attr,
-                    style_attr,
-                    rotation_attr,
-                    fmt_num(x),
-                    fmt_num(header_y),
-                    fmt_num(x),
-                    fmt_num(y + height),
-                    fmt_num(x + width),
-                    fmt_num(y + height),
-                    fmt_num(x + width),
-                    fmt_num(header_y),
-                    stroke_attr,
-                    stroke_width_attr,
-                    stroke_style_attr,
-                    rotation_attr,
-                    fmt_num(x),
-                    fmt_num(header_y),
-                    fmt_num(x + width),
-                    fmt_num(header_y),
-                    stroke_attr,
-                    stroke_width_attr,
-                    stroke_style_attr,
-                    rotation_attr,
-                    close
-                )
-                .unwrap();
+                let vertical_swimlane = swimlane_is_vertical(cell);
+                if vertical_swimlane {
+                    let header_x = x + start_size;
+                    write!(
+                        out,
+                        "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                        cell.id,
+                        open,
+                        fmt_num(header_x),
+                        fmt_num(y),
+                        fmt_num(x),
+                        fmt_num(y),
+                        fmt_num(x),
+                        fmt_num(y + height),
+                        fmt_num(header_x),
+                        fmt_num(y + height),
+                        fill_attr,
+                        stroke_attr,
+                        stroke_width_attr,
+                        style_attr,
+                        rotation_attr,
+                        fmt_num(header_x),
+                        fmt_num(y),
+                        fmt_num(x + width),
+                        fmt_num(y),
+                        fmt_num(x + width),
+                        fmt_num(y + height),
+                        fmt_num(header_x),
+                        fmt_num(y + height),
+                        stroke_attr,
+                        stroke_width_attr,
+                        stroke_style_attr,
+                        rotation_attr,
+                        fmt_num(header_x),
+                        fmt_num(y),
+                        fmt_num(header_x),
+                        fmt_num(y + height),
+                        stroke_attr,
+                        stroke_width_attr,
+                        stroke_style_attr,
+                        rotation_attr,
+                        close
+                    )
+                    .unwrap();
+                } else {
+                    let header_y = y + start_size;
+                    write!(
+                        out,
+                        "<g data-cell-id=\"{}\">{}<path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {} L {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} L {} {}\" fill=\"none\" pointer-events=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                        cell.id,
+                        open,
+                        fmt_num(x),
+                        fmt_num(header_y),
+                        fmt_num(x),
+                        fmt_num(y),
+                        fmt_num(x + width),
+                        fmt_num(y),
+                        fmt_num(x + width),
+                        fmt_num(header_y),
+                        fill_attr,
+                        stroke_attr,
+                        stroke_width_attr,
+                        style_attr,
+                        rotation_attr,
+                        fmt_num(x),
+                        fmt_num(header_y),
+                        fmt_num(x),
+                        fmt_num(y + height),
+                        fmt_num(x + width),
+                        fmt_num(y + height),
+                        fmt_num(x + width),
+                        fmt_num(header_y),
+                        stroke_attr,
+                        stroke_width_attr,
+                        stroke_style_attr,
+                        rotation_attr,
+                        fmt_num(x),
+                        fmt_num(header_y),
+                        fmt_num(x + width),
+                        fmt_num(header_y),
+                        stroke_attr,
+                        stroke_width_attr,
+                        stroke_style_attr,
+                        rotation_attr,
+                        close
+                    )
+                    .unwrap();
+                }
             } else if is_partial_rectangle(style) {
                 let top = style_value(style, "top") != Some("0");
                 let right = style_value(style, "right") != Some("0");
@@ -551,6 +602,107 @@ fn render_cells_recursive(
                     close
                 )
                 .unwrap();
+            } else if style_value(style, "shape") == Some("datastore") {
+                let dy = (height / 7.5).min(height / 2.0);
+                let top_y = y + dy;
+                let bottom_y = y + height - dy;
+                let control_top = y - dy / 3.0;
+                let control_bottom = y + height + dy / 3.0;
+                let mid_y = top_y + dy / 2.0;
+                let line_low = top_y + dy;
+                let control_mid = mid_y + dy;
+                let control_low = line_low + dy;
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<path d=\"M {} {} C {} {} {} {} {} {} L {} {} C {} {} {} {} {} {} Z\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} /><path d=\"M {} {} C {} {} {} {} {} {} M {} {} C {} {} {} {} {} {} M {} {} C {} {} {} {} {} {}\" fill=\"none\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(top_y),
+                    fmt_num(x),
+                    fmt_num(control_top),
+                    fmt_num(x + width),
+                    fmt_num(control_top),
+                    fmt_num(x + width),
+                    fmt_num(top_y),
+                    fmt_num(x + width),
+                    fmt_num(bottom_y),
+                    fmt_num(x + width),
+                    fmt_num(control_bottom),
+                    fmt_num(x),
+                    fmt_num(control_bottom),
+                    fmt_num(x),
+                    fmt_num(bottom_y),
+                    fill_attr,
+                    stroke_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    fmt_num(x),
+                    fmt_num(top_y),
+                    fmt_num(x),
+                    fmt_num(line_low),
+                    fmt_num(x + width),
+                    fmt_num(line_low),
+                    fmt_num(x + width),
+                    fmt_num(top_y),
+                    fmt_num(x),
+                    fmt_num(mid_y),
+                    fmt_num(x),
+                    fmt_num(control_mid),
+                    fmt_num(x + width),
+                    fmt_num(control_mid),
+                    fmt_num(x + width),
+                    fmt_num(mid_y),
+                    fmt_num(x),
+                    fmt_num(line_low),
+                    fmt_num(x),
+                    fmt_num(control_low),
+                    fmt_num(x + width),
+                    fmt_num(control_low),
+                    fmt_num(x + width),
+                    fmt_num(line_low),
+                    stroke_attr,
+                    stroke_width_attr,
+                    stroke_style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
+            } else if style_value(style, "shape") == Some("switch") {
+                let center_x = x + width / 2.0;
+                let center_y = y + height / 2.0;
+                write!(
+                    out,
+                    "<g data-cell-id=\"{}\">{}<path d=\"M {} {} Q {} {} {} {} Q {} {} {} {} Q {} {} {} {} Q {} {} {} {}\" fill=\"{}\" pointer-events=\"all\" stroke=\"{}\" stroke-miterlimit=\"10\"{}{}{} />{}",
+                    cell.id,
+                    open,
+                    fmt_num(x),
+                    fmt_num(y),
+                    fmt_num(center_x),
+                    fmt_num(center_y),
+                    fmt_num(x + width),
+                    fmt_num(y),
+                    fmt_num(center_x),
+                    fmt_num(center_y),
+                    fmt_num(x + width),
+                    fmt_num(y + height),
+                    fmt_num(center_x),
+                    fmt_num(center_y),
+                    fmt_num(x),
+                    fmt_num(y + height),
+                    fmt_num(center_x),
+                    fmt_num(center_y),
+                    fmt_num(x),
+                    fmt_num(y),
+                    fill_attr,
+                    stroke_attr,
+                    stroke_width_attr,
+                    style_attr,
+                    rotation_attr,
+                    close
+                )
+                .unwrap();
             } else if is_ellipse(style) {
                 write!(
                     out,
@@ -601,9 +753,18 @@ fn render_cells_recursive(
                 .unwrap();
             }
             if is_swimlane(style) {
-                if let Some((label, uses_ext)) =
-                    render_swimlane_label(cell, x, y, width, swimlane_start_size(style))
-                {
+                let vertical_swimlane = swimlane_is_vertical(cell);
+                if let Some((label, uses_ext)) = render_swimlane_label(
+                    cell,
+                    x,
+                    y,
+                    raw_x,
+                    raw_y,
+                    width,
+                    height,
+                    swimlane_start_size(style),
+                    vertical_swimlane,
+                ) {
                     out.push_str(&label);
                     if uses_ext {
                         *requires_extensibility = true;
@@ -613,7 +774,7 @@ fn render_cells_recursive(
                 out.push_str(&label);
                 *requires_extensibility = true;
             }
-            if children_by_parent.contains_key(cell.id.as_str()) {
+            if children_by_parent.contains_key(cell.id.as_str()) && !is_collapsed(cell) {
                 render_cells_recursive(
                     cell.id.as_str(),
                     out,
@@ -3266,6 +3427,18 @@ fn vertex_top_left(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Svg
     })
 }
 
+fn vertex_top_left_raw(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> SvgResult<Point> {
+    let geometry = cell
+        .geometry
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingGeometry(cell.id.clone()))?;
+    let offset = parent_offset_raw(cell, cell_by_id);
+    Ok(Point {
+        x: geometry.raw_x.or(geometry.x).unwrap_or(0.0) + offset.x,
+        y: geometry.raw_y.or(geometry.y).unwrap_or(0.0) + offset.y,
+    })
+}
+
 fn parent_offset(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Point {
     let mut offset = Point { x: 0.0, y: 0.0 };
     let mut current = cell;
@@ -3279,6 +3452,25 @@ fn parent_offset(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Point
         {
             offset.x += geometry.x.unwrap_or(0.0);
             offset.y += geometry.y.unwrap_or(0.0);
+        }
+        current = parent;
+    }
+    offset
+}
+
+fn parent_offset_raw(cell: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> Point {
+    let mut offset = Point { x: 0.0, y: 0.0 };
+    let mut current = cell;
+    while let Some(parent_id) = current.parent.as_ref() {
+        let Some(parent) = cell_by_id.get(parent_id) else {
+            break;
+        };
+        if parent.vertex == Some(true)
+            && parent.edge != Some(true)
+            && let Some(geometry) = parent.geometry.as_ref()
+        {
+            offset.x += geometry.raw_x.or(geometry.x).unwrap_or(0.0);
+            offset.y += geometry.raw_y.or(geometry.y).unwrap_or(0.0);
         }
         current = parent;
     }
@@ -3368,6 +3560,15 @@ fn fmt_num(value: f64) -> String {
 
 fn fmt_num_raw(value: f64) -> String {
     format!("{value}")
+}
+
+fn snap_coord(value: f64) -> f64 {
+    let rounded = value.round();
+    if (value - rounded).abs() < 1e-9 {
+        rounded
+    } else {
+        value
+    }
 }
 
 fn render_vertex_label(vertex: &MxCell, x: f64, y: f64, width: f64, height: f64) -> Option<String> {
@@ -3480,12 +3681,22 @@ fn swimlane_title_bold(style: Option<&str>) -> bool {
     }
 }
 
+fn swimlane_is_vertical(cell: &MxCell) -> bool {
+    let style = cell.style.as_deref();
+    style_value(style, "horizontal") == Some("0") || is_collapsed(cell)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_swimlane_label(
     vertex: &MxCell,
     x: f64,
     y: f64,
+    raw_x: f64,
+    raw_y: f64,
     width: f64,
+    height: f64,
     start_size: f64,
+    vertical: bool,
 ) -> Option<(String, bool)> {
     let value = vertex.value.as_deref()?.trim();
     if value.is_empty() {
@@ -3500,33 +3711,82 @@ fn render_swimlane_label(
     } else {
         "light-dark(rgb(0, 0, 0), rgb(255, 255, 255))".to_string()
     };
-    let label_width = (width - 2.0).max(0.0);
-    let padding_top = y + (start_size / 2.0).ceil();
-    let margin_left = x + 1.0;
+    let wrap_label = style_value(style, "whiteSpace") == Some("wrap");
+    let (label_width, padding_top, margin_left, open, close, white_space_style) = if vertical {
+        let center_x = raw_x + start_size / 2.0;
+        let center_y = raw_y + height / 2.0;
+        (
+            1.0,
+            center_y,
+            center_x,
+            format!(
+                "<g><g transform=\"rotate(-90 {} {})\">",
+                fmt_num_raw(center_x),
+                fmt_num_raw(center_y)
+            ),
+            "</g></g>".to_string(),
+            "white-space: nowrap; ".to_string(),
+        )
+    } else if wrap_label {
+        (
+            (width - 2.0).max(0.0),
+            y + (start_size / 2.0).ceil(),
+            x + 1.0,
+            "<g><g>".to_string(),
+            "</g></g>".to_string(),
+            "white-space: normal; word-wrap: normal; ".to_string(),
+        )
+    } else {
+        (
+            1.0,
+            y + (start_size / 2.0).ceil(),
+            x + width / 2.0,
+            "<g><g>".to_string(),
+            "</g></g>".to_string(),
+            "white-space: nowrap; ".to_string(),
+        )
+    };
     if style_value(style, "html") == Some("1") {
         let mut out = String::new();
         write!(
             out,
-            "<g><g><foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: {}; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: {}; line-height: 1.2; pointer-events: all; {}white-space: normal; word-wrap: normal; \">{}</div></div></div></foreignObject></g></g>",
+            "{}<foreignObject style=\"overflow: visible; text-align: left;\" pointer-events=\"none\" width=\"100%\" height=\"100%\" requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"><div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"display: flex; align-items: unsafe center; justify-content: unsafe center; width: {}px; height: 1px; padding-top: {}px; margin-left: {}px;\"><div style=\"box-sizing: border-box; font-size: 0; text-align: center; color: {}; \"><div style=\"display: inline-block; font-size: 12px; font-family: Helvetica; color: {}; line-height: 1.2; pointer-events: all; {}{}\">{}</div></div></div></foreignObject>{}",
+            open,
             fmt_num(label_width),
             fmt_num(padding_top),
             fmt_num(margin_left),
             text_color,
             inner_color,
             bold_style(bold),
-            text
+            white_space_style,
+            text,
+            close
         )
         .unwrap();
         return Some((out, true));
     }
-    let text_x = x + width / 2.0;
-    let text_y = y + start_size - 5.0;
+    let (text_x, text_y, transform_attr) = if vertical {
+        let center_x = raw_x + start_size / 2.0;
+        let center_y = raw_y + height / 2.0;
+        (
+            center_x,
+            center_y + 5.0,
+            format!(
+                " transform=\"rotate(-90,{},{})\"",
+                fmt_num_raw(center_x),
+                fmt_num_raw(center_y)
+            ),
+        )
+    } else {
+        (x + width / 2.0, y + start_size - 5.0, String::new())
+    };
     let font_weight = if bold { " font-weight=\"bold\"" } else { "" };
     let out = format!(
-        "<g><g fill=\"{}\" font-family=\"Helvetica\" font-size=\"12px\"{} style=\"fill: {};\" text-anchor=\"middle\"><text x=\"{}\" y=\"{}\">{}</text></g></g>",
+        "<g><g fill=\"{}\" font-family=\"Helvetica\" font-size=\"12px\"{} style=\"fill: {};\" text-anchor=\"middle\"{}><text x=\"{}\" y=\"{}\">{}</text></g></g>",
         text_color,
         font_weight,
         text_style,
+        transform_attr,
         fmt_num(text_x),
         fmt_num(text_y),
         text
@@ -4706,6 +4966,13 @@ fn is_cell_visible(cell: &MxCell) -> bool {
     )
 }
 
+fn is_collapsed(cell: &MxCell) -> bool {
+    matches!(
+        cell.extra.get("collapsed").map(String::as_str),
+        Some("1") | Some("true")
+    )
+}
+
 fn resolve_visible_terminal<'a>(
     cell: &'a MxCell,
     cell_by_id: &BTreeMap<String, &'a MxCell>,
@@ -4735,7 +5002,7 @@ fn mark_visibility(
         visible_by_id.insert(child.id.clone(), effective);
         mark_visibility(
             child.id.as_str(),
-            effective,
+            effective && !is_collapsed(child),
             children_by_parent,
             visible_by_id,
         );

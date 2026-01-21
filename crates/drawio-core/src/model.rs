@@ -187,6 +187,12 @@ pub struct MxGeometry {
     pub source_point: Option<MxPoint>,
 
     #[serde(skip)]
+    pub raw_x: Option<f64>,
+
+    #[serde(skip)]
+    pub raw_y: Option<f64>,
+
+    #[serde(skip)]
     pub target_point: Option<MxPoint>,
 
     #[serde(skip)]

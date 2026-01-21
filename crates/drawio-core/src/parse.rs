@@ -752,6 +752,12 @@ fn parse_mxgeometry<R: BufRead>(
         target_point: None,
         offset_point: None,
         points: Vec::new(),
+        raw_x: attrs
+            .get("x")
+            .and_then(|value| value.trim().parse::<f64>().ok()),
+        raw_y: attrs
+            .get("y")
+            .and_then(|value| value.trim().parse::<f64>().ok()),
     })
 }
 
