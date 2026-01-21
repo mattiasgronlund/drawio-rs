@@ -25,4 +25,4 @@ test-keep-cannonicalized:
 
 # Run coverage
 coverage:
-  cargo llvm-cov --workspace --all-targets
+  cargo llvm-cov --workspace --all-targets --lcov --output-path ./target/lcov.info

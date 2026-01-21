@@ -1,5 +1,4 @@
 # Relative to fixtures/corpus
 handpicked/011-rotation.drawio
 handpicked/017-gradients.drawio
-handpicked/018-edge-routing-extra.drawio
 handpicked/019-edge-routing-even_more.drawio
