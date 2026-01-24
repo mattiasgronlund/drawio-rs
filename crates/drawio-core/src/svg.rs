@@ -62,6 +62,49 @@ pub fn debug_render_tree(mxfile: &MxFile, diagram_index: usize) -> SvgResult<Str
     Ok(out)
 }
 
+#[cfg(feature = "edge-debug")]
+pub fn debug_graph_bounds(mxfile: &MxFile, diagram_index: usize) -> SvgResult<DebugGraphBounds> {
+    let diagram = mxfile
+        .diagrams
+        .get(diagram_index)
+        .ok_or(SvgError::MissingDiagram(diagram_index))?;
+    let graph = diagram
+        .graph_model
+        .as_ref()
+        .ok_or(SvgError::MissingGraphModel)?;
+
+    let mut cell_by_id = BTreeMap::new();
+    let mut children_by_parent: BTreeMap<String, Vec<&MxCell>> = BTreeMap::new();
+    for cell in ordered_cells(graph) {
+        let parent_key = cell.parent.clone().unwrap_or_else(|| ROOT_KEY.to_string());
+        children_by_parent.entry(parent_key).or_default().push(cell);
+        cell_by_id.insert(cell.id.clone(), cell);
+    }
+    let mut visible_by_id: BTreeMap<String, bool> = BTreeMap::new();
+    mark_visibility(ROOT_KEY, true, &children_by_parent, &mut visible_by_id);
+
+    let mut vertices = Vec::new();
+    let mut edges = Vec::new();
+    for cell in ordered_cells(graph) {
+        if !visible_by_id.get(&cell.id).copied().unwrap_or(true) {
+            continue;
+        }
+        if cell.edge == Some(true) {
+            edges.push(cell);
+        } else if cell.vertex == Some(true) {
+            if is_edge_label(cell.style.as_deref()) {
+                continue;
+            }
+            if is_group_cell(cell) {
+                continue;
+            }
+            vertices.push(cell);
+        }
+    }
+
+    debug_bounds_for_graph(&vertices, &edges, &cell_by_id)
+}
+
 pub fn generate_svg_to_path<P: AsRef<Path>>(
     mxfile: &MxFile,
     diagram_index: usize,
@@ -980,6 +1023,374 @@ fn bounds_for_graph(
     Ok((min_x, min_y, width, height))
 }
 
+#[cfg(feature = "edge-debug")]
+fn debug_bounds_for_graph(
+    vertices: &[&MxCell],
+    edges: &[&MxCell],
+    cell_by_id: &BTreeMap<String, &MxCell>,
+) -> SvgResult<DebugGraphBounds> {
+    if vertices.is_empty() && edges.is_empty() {
+        return Ok(DebugGraphBounds {
+            raw_min_x: 0.0,
+            raw_min_y: 0.0,
+            raw_max_x: 0.0,
+            raw_max_y: 0.0,
+            min_x: 0.0,
+            min_y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            extra_width: 0.0,
+            extra_height: 0.0,
+            vertices: Vec::new(),
+            edges: Vec::new(),
+        });
+    }
+
+    let has_image = vertices.iter().any(|vertex| {
+        let style = vertex.style.as_deref();
+        style_value(style, "shape") == Some("image") && style_value(style, "image").is_some()
+    });
+
+    let update_bounds =
+        |min_x: &mut f64, min_y: &mut f64, max_x: &mut f64, max_y: &mut f64, point: Point| {
+            *min_x = min_x.min(point.x);
+            *min_y = min_y.min(point.y);
+            *max_x = max_x.max(point.x);
+            *max_y = max_y.max(point.y);
+        };
+
+    let make_bbox = |min_x: f64, min_y: f64, max_x: f64, max_y: f64| DebugBBox {
+        min_x,
+        min_y,
+        max_x,
+        max_y,
+    };
+
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+
+    let mut vertex_bounds = Vec::new();
+    for vertex in vertices {
+        let geometry = vertex
+            .geometry
+            .as_ref()
+            .ok_or_else(|| SvgError::MissingGeometry(vertex.id.clone()))?;
+        let top_left = vertex_top_left(vertex, cell_by_id)?;
+        let x = top_left.x;
+        let y = top_left.y;
+        let width = geometry.width.unwrap_or(0.0);
+        let height = geometry.height.unwrap_or(0.0);
+        let style = vertex.style.as_deref();
+        let stroke_width = stroke_width_value(style);
+        let half = (stroke_width / 2.0).floor();
+        let rotation = rotation_degrees(style);
+        let is_image =
+            style_value(style, "shape") == Some("image") && style_value(style, "image").is_some();
+        let has_transform = vertex_transform(style).is_some();
+        let mut bbox = if rotation.abs() > f64::EPSILON {
+            rotated_bbox(x, y, width, height, rotation)
+        } else {
+            BBox {
+                min_x: x,
+                min_y: y,
+                max_x: x + width,
+                max_y: y + height,
+            }
+        };
+        if is_image {
+            bbox.min_x = bbox.min_x.ceil();
+            bbox.min_y = bbox.min_y.ceil();
+        } else if has_image && has_transform {
+            bbox.min_x += 0.5;
+            bbox.min_y += 0.5;
+            bbox.max_x += 0.5;
+            bbox.max_y += 0.5;
+        }
+        let bbox_before_stroke = make_bbox(bbox.min_x, bbox.min_y, bbox.max_x, bbox.max_y);
+        let bbox_after_stroke = make_bbox(
+            bbox.min_x - half,
+            bbox.min_y - half,
+            bbox.max_x + half,
+            bbox.max_y + half,
+        );
+        min_x = min_x.min(bbox_after_stroke.min_x);
+        min_y = min_y.min(bbox_after_stroke.min_y);
+        max_x = max_x.max(bbox_after_stroke.max_x);
+        max_y = max_y.max(bbox_after_stroke.max_y);
+        vertex_bounds.push(DebugVertexBounds {
+            id: vertex.id.clone(),
+            x,
+            y,
+            width,
+            height,
+            rotation,
+            stroke_width,
+            is_image,
+            has_transform,
+            bbox_before_stroke,
+            bbox_after_stroke,
+        });
+    }
+
+    let mut edge_bounds = Vec::new();
+    let mut extra_width: f64 = 0.0;
+    let mut extra_height: f64 = 0.0;
+    for edge in edges {
+        let Some(edge_path) = edge_path_absolute(edge, cell_by_id)? else {
+            continue;
+        };
+        let style = edge.style.as_deref();
+        let shape = style_value(style, "shape").map(|value| value.to_string());
+        let edge_style = style_value(style, "edgeStyle").map(|value| value.to_string());
+        let start_arrow = style_value(style, "startArrow").map(|value| value.to_string());
+        let end_arrow = style_value(style, "endArrow").map(|value| value.to_string());
+        let stroke_width = stroke_width_value(style);
+
+        let mut edge_min_x = f64::MAX;
+        let mut edge_min_y = f64::MAX;
+        let mut edge_max_x = f64::MIN;
+        let mut edge_max_y = f64::MIN;
+        for point in edge_path
+            .full_points
+            .iter()
+            .chain(edge_path.arrow_points.iter())
+        {
+            update_bounds(
+                &mut edge_min_x,
+                &mut edge_min_y,
+                &mut edge_max_x,
+                &mut edge_max_y,
+                *point,
+            );
+        }
+        let base_bbox = if edge_min_x == f64::MAX {
+            None
+        } else {
+            Some(make_bbox(edge_min_x, edge_min_y, edge_max_x, edge_max_y))
+        };
+
+        let mut flex_bbox = None;
+        if shape.as_deref() == Some("flexArrow") {
+            let metrics = flex_arrow_metrics();
+            let centerline = flex_arrow_centerline(edge, &edge_path);
+            let mut flex_min_x = f64::MAX;
+            let mut flex_min_y = f64::MAX;
+            let mut flex_max_x = f64::MIN;
+            let mut flex_max_y = f64::MIN;
+            for point in &centerline {
+                update_bounds(
+                    &mut flex_min_x,
+                    &mut flex_min_y,
+                    &mut flex_max_x,
+                    &mut flex_max_y,
+                    Point {
+                        x: point.x - metrics.head_half,
+                        y: point.y - metrics.head_half,
+                    },
+                );
+                update_bounds(
+                    &mut flex_min_x,
+                    &mut flex_min_y,
+                    &mut flex_max_x,
+                    &mut flex_max_y,
+                    Point {
+                        x: point.x + metrics.head_half,
+                        y: point.y + metrics.head_half,
+                    },
+                );
+            }
+            let start_head = match style_value(style, "startArrow") {
+                Some("none") | Some("0") => false,
+                Some(_) => true,
+                None => false,
+            };
+            let end_head = !matches!(style_value(style, "endArrow"), Some("none") | Some("0"));
+            if end_head
+                && let Some((tip, left, right)) = flex_arrow_head_points(&centerline, true, metrics)
+            {
+                for point in [tip, left, right] {
+                    update_bounds(
+                        &mut flex_min_x,
+                        &mut flex_min_y,
+                        &mut flex_max_x,
+                        &mut flex_max_y,
+                        point,
+                    );
+                }
+            }
+            if start_head
+                && let Some((tip, left, right)) =
+                    flex_arrow_head_points(&centerline, false, metrics)
+            {
+                for point in [tip, left, right] {
+                    update_bounds(
+                        &mut flex_min_x,
+                        &mut flex_min_y,
+                        &mut flex_max_x,
+                        &mut flex_max_y,
+                        point,
+                    );
+                }
+            }
+            if flex_min_x != f64::MAX {
+                flex_bbox = Some(make_bbox(flex_min_x, flex_min_y, flex_max_x, flex_max_y));
+                edge_min_x = edge_min_x.min(flex_min_x);
+                edge_min_y = edge_min_y.min(flex_min_y);
+                edge_max_x = edge_max_x.max(flex_max_x);
+                edge_max_y = edge_max_y.max(flex_max_y);
+            }
+        }
+
+        let mut marker_start_bbox = None;
+        let mut marker_end_bbox = None;
+        let mut marker_start_kind = None;
+        let mut marker_end_kind = None;
+        if !matches!(shape.as_deref(), Some("arrow" | "link" | "flexArrow")) {
+            let metrics = edge_arrow_metrics(stroke_width);
+            let start_kind = marker_kind_from_value(style_value(style, "startArrow"));
+            let end_kind = match style_value(style, "endArrow") {
+                Some("none") => None,
+                Some(value) => marker_kind_from_value(Some(value)),
+                None => Some(MarkerKind::Classic),
+            };
+            marker_start_kind = start_kind.map(|kind| format!("{:?}", kind));
+            marker_end_kind = end_kind.map(|kind| format!("{:?}", kind));
+            if start_kind.is_some() {
+                let mut mmin_x = f64::MAX;
+                let mut mmin_y = f64::MAX;
+                let mut mmax_x = f64::MIN;
+                let mut mmax_y = f64::MIN;
+                expand_marker_bounds(
+                    &mut mmin_x,
+                    &mut mmin_y,
+                    &mut mmax_x,
+                    &mut mmax_y,
+                    edge_path.source_anchor,
+                    edge_path.start_dir,
+                    metrics,
+                );
+                if mmin_x != f64::MAX {
+                    marker_start_bbox = Some(make_bbox(mmin_x, mmin_y, mmax_x, mmax_y));
+                    edge_min_x = edge_min_x.min(mmin_x);
+                    edge_min_y = edge_min_y.min(mmin_y);
+                    edge_max_x = edge_max_x.max(mmax_x);
+                    edge_max_y = edge_max_y.max(mmax_y);
+                }
+            }
+            if end_kind.is_some() {
+                let mut mmin_x = f64::MAX;
+                let mut mmin_y = f64::MAX;
+                let mut mmax_x = f64::MIN;
+                let mut mmax_y = f64::MIN;
+                expand_marker_bounds(
+                    &mut mmin_x,
+                    &mut mmin_y,
+                    &mut mmax_x,
+                    &mut mmax_y,
+                    edge_path.target_anchor,
+                    Point {
+                        x: -edge_path.end_dir.x,
+                        y: -edge_path.end_dir.y,
+                    },
+                    metrics,
+                );
+                if mmin_x != f64::MAX {
+                    marker_end_bbox = Some(make_bbox(mmin_x, mmin_y, mmax_x, mmax_y));
+                    edge_min_x = edge_min_x.min(mmin_x);
+                    edge_min_y = edge_min_y.min(mmin_y);
+                    edge_max_x = edge_max_x.max(mmax_x);
+                    edge_max_y = edge_max_y.max(mmax_y);
+                }
+            }
+        }
+
+        let final_bbox = if edge_min_x == f64::MAX {
+            None
+        } else {
+            Some(make_bbox(edge_min_x, edge_min_y, edge_max_x, edge_max_y))
+        };
+        if let Some(ref bbox) = final_bbox {
+            min_x = min_x.min(bbox.min_x);
+            min_y = min_y.min(bbox.min_y);
+            max_x = max_x.max(bbox.max_x);
+            max_y = max_y.max(bbox.max_y);
+        }
+
+        let (edge_extra_width, edge_extra_height) =
+            if edge.source.is_none() && edge.target.is_none() {
+                let (tip_gap, arrow_length, arrow_back, _arrow_half_height) =
+                    edge_arrow_metrics(stroke_width_value(edge.style.as_deref()));
+                (tip_gap + arrow_length + arrow_back, tip_gap)
+            } else {
+                (0.0, 0.0)
+            };
+        extra_width = extra_width.max(edge_extra_width);
+        extra_height = extra_height.max(edge_extra_height);
+
+        edge_bounds.push(DebugEdgeBounds {
+            id: edge.id.clone(),
+            source_id: edge.source.clone(),
+            target_id: edge.target.clone(),
+            shape,
+            edge_style,
+            start_arrow,
+            end_arrow,
+            stroke_width,
+            extra_width: edge_extra_width,
+            extra_height: edge_extra_height,
+            base_bbox,
+            flex_bbox,
+            marker_start_bbox,
+            marker_end_bbox,
+            marker_start_kind,
+            marker_end_kind,
+            final_bbox,
+        });
+    }
+
+    if min_x == f64::MAX || min_y == f64::MAX {
+        return Ok(DebugGraphBounds {
+            raw_min_x: 0.0,
+            raw_min_y: 0.0,
+            raw_max_x: 0.0,
+            raw_max_y: 0.0,
+            min_x: 0.0,
+            min_y: 0.0,
+            width: 0.0,
+            height: 0.0,
+            extra_width: 0.0,
+            extra_height: 0.0,
+            vertices: vertex_bounds,
+            edges: edge_bounds,
+        });
+    }
+
+    let raw_min_x = min_x;
+    let raw_min_y = min_y;
+    let raw_max_x = max_x;
+    let raw_max_y = max_y;
+    let min_x = min_x.floor();
+    let min_y = min_y.floor();
+    let width = (max_x - min_x + extra_width).round();
+    let height = (max_y - min_y + extra_height).round();
+    Ok(DebugGraphBounds {
+        raw_min_x,
+        raw_min_y,
+        raw_max_x,
+        raw_max_y,
+        min_x,
+        min_y,
+        width,
+        height,
+        extra_width,
+        extra_height,
+        vertices: vertex_bounds,
+        edges: edge_bounds,
+    })
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Point {
     x: f64,
@@ -1004,7 +1415,72 @@ struct EdgePath {
     target_anchor: Point,
     start_dir: Point,
     end_dir: Point,
+    #[allow(dead_code)]
     entity_relation_target_ancestor: bool,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugBBox {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugVertexBounds {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub rotation: f64,
+    pub stroke_width: f64,
+    pub is_image: bool,
+    pub has_transform: bool,
+    pub bbox_before_stroke: DebugBBox,
+    pub bbox_after_stroke: DebugBBox,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugEdgeBounds {
+    pub id: String,
+    pub source_id: Option<String>,
+    pub target_id: Option<String>,
+    pub shape: Option<String>,
+    pub edge_style: Option<String>,
+    pub start_arrow: Option<String>,
+    pub end_arrow: Option<String>,
+    pub stroke_width: f64,
+    pub extra_width: f64,
+    pub extra_height: f64,
+    pub base_bbox: Option<DebugBBox>,
+    pub flex_bbox: Option<DebugBBox>,
+    pub marker_start_bbox: Option<DebugBBox>,
+    pub marker_end_bbox: Option<DebugBBox>,
+    pub marker_start_kind: Option<String>,
+    pub marker_end_kind: Option<String>,
+    pub final_bbox: Option<DebugBBox>,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct DebugGraphBounds {
+    pub raw_min_x: f64,
+    pub raw_min_y: f64,
+    pub raw_max_x: f64,
+    pub raw_max_y: f64,
+    pub min_x: f64,
+    pub min_y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub extra_width: f64,
+    pub extra_height: f64,
+    pub vertices: Vec<DebugVertexBounds>,
+    pub edges: Vec<DebugEdgeBounds>,
 }
 
 #[cfg(feature = "edge-debug")]
@@ -1256,10 +1732,20 @@ fn edge_line_paths(
     {
         return vec![segment];
     }
+    if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle")
+        && style_value(style, "curved") == Some("1")
+    {
+        let segment = style_value(style, "segment")
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or(20.0);
+        return vec![entity_relation_curved_path(
+            edge_path, min_x, min_y, segment,
+        )];
+    }
     if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
         let segment = style_value(style, "segment")
             .and_then(|value| value.parse::<f64>().ok())
-            .unwrap_or(10.0);
+            .unwrap_or(20.0);
         return vec![entity_relation_path(edge_path, min_x, min_y, segment)];
     }
     if style_value(style, "curved") == Some("1") {
@@ -1586,7 +2072,7 @@ fn edge_path_absolute(
     let style = edge.style.as_deref();
     let (start_offset, end_offset) = marker_offsets(style, stroke_width_value(style));
 
-    let start_dir = if let Some(first) = control_points.first() {
+    let mut start_dir = if let Some(first) = control_points.first() {
         normalize(Point {
             x: first.x - start_anchor.x,
             y: first.y - start_anchor.y,
@@ -1597,7 +2083,7 @@ fn edge_path_absolute(
             y: end_anchor.y - start_anchor.y,
         })
     };
-    let end_dir = if let Some(last) = control_points.last() {
+    let mut end_dir = if let Some(last) = control_points.last() {
         normalize(Point {
             x: end_anchor.x - last.x,
             y: end_anchor.y - last.y,
@@ -1608,6 +2094,18 @@ fn edge_path_absolute(
             y: end_anchor.y - start_anchor.y,
         })
     };
+    if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
+        if let Some(source_cell) = source {
+            start_dir = axis_dir_from_anchor(source_cell, start_anchor, cell_by_id)?;
+        }
+        if let Some(target_cell) = target {
+            let target_dir = axis_dir_from_anchor(target_cell, end_anchor, cell_by_id)?;
+            end_dir = Point {
+                x: -target_dir.x,
+                y: -target_dir.y,
+            };
+        }
+    }
 
     let start = Point {
         x: start_anchor.x + start_dir.x * start_offset,
@@ -1891,6 +2389,23 @@ fn terminal_point_override(
         };
     }
     Ok(Some(point))
+}
+
+fn axis_dir_from_anchor(
+    cell: &MxCell,
+    anchor: Point,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+) -> SvgResult<Point> {
+    let center = cell_center(cell, cell_by_id)?;
+    let dx = anchor.x - center.x;
+    let dy = anchor.y - center.y;
+    if dx.abs() >= dy.abs() {
+        let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
+        Ok(Point { x: sign, y: 0.0 })
+    } else {
+        let sign = if dy >= 0.0 { 1.0 } else { -1.0 };
+        Ok(Point { x: 0.0, y: sign })
+    }
 }
 
 fn point_from_mxpoint(point: &MxPoint) -> Option<Point> {
@@ -2199,6 +2714,138 @@ fn entity_relation_path(
     min_y: f64,
     segment: f64,
 ) -> EdgeLineSegment {
+    let points = entity_relation_points(edge_path, segment);
+
+    if points.len() < 2 {
+        // Fallback to straight line if points insufficient.
+        let start = edge_path
+            .line_points
+            .first()
+            .copied()
+            .unwrap_or(edge_path.source_anchor);
+        let end = edge_path
+            .line_points
+            .last()
+            .copied()
+            .unwrap_or(edge_path.target_anchor);
+        let mut d = String::new();
+        write!(
+            d,
+            "M {} {} L {} {}",
+            fmt_num(start.x - min_x),
+            fmt_num(start.y - min_y),
+            fmt_num(end.x - min_x),
+            fmt_num(end.y - min_y)
+        )
+        .unwrap();
+        return EdgeLineSegment {
+            d,
+            fill: None,
+            linejoin: None,
+            miterlimit: None,
+            pointer_events: "stroke",
+        };
+    }
+
+    let midpoint = |a: Point, b: Point| Point {
+        x: (a.x + b.x) / 2.0,
+        y: (a.y + b.y) / 2.0,
+    };
+
+    let mut d = String::new();
+    let write_point = |point: Point, out: &mut String| {
+        write!(
+            out,
+            " {} {}",
+            fmt_num(point.x - min_x),
+            fmt_num(point.y - min_y)
+        )
+        .unwrap();
+    };
+    let first = points[0];
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(first.x - min_x),
+        fmt_num(first.y - min_y)
+    )
+    .unwrap();
+
+    if points.len() > 1 {
+        write!(d, " L").unwrap();
+        write_point(points[1], &mut d);
+    }
+    if points.len() > 2 {
+        let mid = midpoint(points[1], points[2]);
+        let dir = entity_relation_dir(edge_path);
+        let control = if dir.x.abs() >= dir.y.abs() {
+            Point {
+                x: mid.x,
+                y: points[1].y,
+            }
+        } else {
+            Point {
+                x: points[1].x,
+                y: mid.y,
+            }
+        };
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(control.x - min_x),
+            fmt_num(control.y - min_y),
+            fmt_num(points[2].x - min_x),
+            fmt_num(points[2].y - min_y)
+        )
+        .unwrap();
+    }
+    if points.len() > 3 {
+        write!(d, " L").unwrap();
+        write_point(points[3], &mut d);
+    }
+    if points.len() > 4 {
+        let mid = midpoint(points[3], points[4]);
+        let dir = entity_relation_dir(edge_path);
+        let control = if dir.x.abs() >= dir.y.abs() {
+            Point {
+                x: mid.x,
+                y: points[4].y,
+            }
+        } else {
+            Point {
+                x: points[4].x,
+                y: mid.y,
+            }
+        };
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(control.x - min_x),
+            fmt_num(control.y - min_y),
+            fmt_num(points[4].x - min_x),
+            fmt_num(points[4].y - min_y)
+        )
+        .unwrap();
+    }
+    if points.len() > 5 {
+        write!(d, " L").unwrap();
+        write_point(points[5], &mut d);
+    }
+    EdgeLineSegment {
+        d,
+        fill: None,
+        linejoin: None,
+        miterlimit: None,
+        pointer_events: "stroke",
+    }
+}
+
+fn entity_relation_curved_path(
+    edge_path: &EdgePath,
+    min_x: f64,
+    min_y: f64,
+    segment: f64,
+) -> EdgeLineSegment {
     let start = edge_path
         .line_points
         .first()
@@ -2209,65 +2856,58 @@ fn entity_relation_path(
         .last()
         .copied()
         .unwrap_or(edge_path.target_anchor);
-    let dir = if end.x >= start.x { 1.0 } else { -1.0 };
-    let (control_in, mid, control_out) = if edge_path.entity_relation_target_ancestor {
-        let control_x = end.x + dir * segment;
-        (
-            Point {
-                x: control_x,
-                y: start.y,
-            },
-            Point {
-                x: control_x,
-                y: (start.y + end.y) / 2.0,
-            },
-            Point {
-                x: control_x,
-                y: end.y,
-            },
-        )
-    } else {
-        (
-            Point {
-                x: start.x + dir * segment,
-                y: start.y,
-            },
-            Point {
-                x: (start.x + end.x) / 2.0,
-                y: (start.y + end.y) / 2.0,
-            },
-            Point {
-                x: end.x - dir * segment,
-                y: end.y,
-            },
-        )
+    let control_start = Point {
+        x: start.x + edge_path.start_dir.x * segment,
+        y: start.y + edge_path.start_dir.y * segment,
     };
+    let control_end = Point {
+        x: end.x - edge_path.end_dir.x * segment,
+        y: end.y - edge_path.end_dir.y * segment,
+    };
+    let points = [start, control_start, control_end, end];
+    curved_path_from_points(&points, min_x, min_y)
+}
+
+fn curved_path_from_points(points: &[Point], min_x: f64, min_y: f64) -> EdgeLineSegment {
     let mut d = String::new();
-    write!(
-        d,
-        "M {} {}",
-        fmt_num(start.x - min_x),
-        fmt_num(start.y - min_y)
-    )
-    .unwrap();
-    write!(
-        d,
-        " Q {} {} {} {}",
-        fmt_num(control_in.x - min_x),
-        fmt_num(control_in.y - min_y),
-        fmt_num(mid.x - min_x),
-        fmt_num(mid.y - min_y)
-    )
-    .unwrap();
-    write!(
-        d,
-        " Q {} {} {} {}",
-        fmt_num(control_out.x - min_x),
-        fmt_num(control_out.y - min_y),
-        fmt_num(end.x - min_x),
-        fmt_num(end.y - min_y)
-    )
-    .unwrap();
+    if let Some(first) = points.first() {
+        write!(
+            d,
+            "M {} {}",
+            fmt_num(first.x - min_x),
+            fmt_num(first.y - min_y)
+        )
+        .unwrap();
+    }
+    if points.len() >= 3 {
+        for window in points[1..points.len() - 1].windows(2) {
+            let control = window[0];
+            let end = Point {
+                x: (window[0].x + window[1].x) / 2.0,
+                y: (window[0].y + window[1].y) / 2.0,
+            };
+            write!(
+                d,
+                " Q {} {} {} {}",
+                fmt_num(control.x - min_x),
+                fmt_num(control.y - min_y),
+                fmt_num(end.x - min_x),
+                fmt_num(end.y - min_y)
+            )
+            .unwrap();
+        }
+        let control = points[points.len() - 2];
+        let last = points[points.len() - 1];
+        write!(
+            d,
+            " Q {} {} {} {}",
+            fmt_num(control.x - min_x),
+            fmt_num(control.y - min_y),
+            fmt_num(last.x - min_x),
+            fmt_num(last.y - min_y)
+        )
+        .unwrap();
+    }
     EdgeLineSegment {
         d,
         fill: None,
@@ -2387,7 +3027,12 @@ fn flex_arrow_centerline(edge: &MxCell, edge_path: &EdgePath) -> Vec<Point> {
             let elbow = style_value(style, "elbow");
             isometric_centerline(source, target, elbow)
         }
-        Some("entityRelationEdgeStyle") => entity_relation_points(edge_path),
+        Some("entityRelationEdgeStyle") => {
+            let segment = style_value(style, "segment")
+                .and_then(|value| value.parse::<f64>().ok())
+                .unwrap_or(20.0);
+            entity_relation_points(edge_path, segment)
+        }
         _ => vec![source, target],
     }
 }
@@ -2459,8 +3104,7 @@ fn isometric_centerline(source: Point, target: Point, elbow: Option<&str>) -> Ve
     }
 }
 
-fn entity_relation_points(edge_path: &EdgePath) -> Vec<Point> {
-    let segment = 20.0;
+fn entity_relation_points(edge_path: &EdgePath, segment: f64) -> Vec<Point> {
     let curve_ratio = 0.9745;
     let curve_y_ratio = 0.316;
     let start = edge_path
@@ -2473,7 +3117,7 @@ fn entity_relation_points(edge_path: &EdgePath) -> Vec<Point> {
         .last()
         .copied()
         .unwrap_or(edge_path.target_anchor);
-    let dir = edge_path.start_dir;
+    let dir = entity_relation_dir(edge_path);
     let perp = Point {
         x: -dir.y,
         y: dir.x,
@@ -2505,6 +3149,18 @@ fn entity_relation_points(edge_path: &EdgePath) -> Vec<Point> {
         target_segment,
         end,
     ]
+}
+
+fn entity_relation_dir(edge_path: &EdgePath) -> Point {
+    let dx = edge_path.target_anchor.x - edge_path.source_anchor.x;
+    let dy = edge_path.target_anchor.y - edge_path.source_anchor.y;
+    if dx.abs() >= dy.abs() {
+        let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
+        Point { x: sign, y: 0.0 }
+    } else {
+        let sign = if dy >= 0.0 { 1.0 } else { -1.0 };
+        Point { x: 0.0, y: sign }
+    }
 }
 
 fn flex_arrow_outline(

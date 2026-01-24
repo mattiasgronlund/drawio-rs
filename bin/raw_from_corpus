@@ -10,10 +10,12 @@ if [ $# != 1 ]; then
     exit
 fi
 pushd  "${WORKSPACE_FOLDER}/fixtures/corpus/handpicked" >/dev/null
-filename="${1}"*.drawio
+filename="$(echo "${1}"*.drawio)"
+echo "filename: $filename"
+
 popd >/dev/null
-bin/drawio --export --output fixtures/raw/handpicked/${filename%.*}.svg --format svg fixtures/corpus/handpicked/${filename}
-rm -f fixtures/expected/handpicked/${filename%.*}.svg
+bin/drawio --export --output fixtures/raw/handpicked/"${filename%.*}.svg" --format svg fixtures/corpus/handpicked/"${filename}"
+rm -f fixtures/expected/handpicked/"${filename%.*}.svg"
 cd "${WORKSPACE_FOLDER}"
 
 UPDATE_EXPECTED=1 cargo test -p drawio-core --test parser_dump parser_dump_matches_expected_json  >/dev/null 2>&1 || echo update_expected failed
@@ -25,9 +27,9 @@ if [ -d target/canonicalized-svg/handpicked/"${1}"-* ]; then
     diff_cannonialized "${1}"
 else
     echo "updated:"
-    ls -l fixtures/raw/handpicked/${filename%.*}.svg
-    ls -l fixtures/expected/handpicked/${filename%.*}.svg
-    ls -l target/canonicalized-svg/handpicked
+    ls -l "fixtures/raw/handpicked/${filename%.*}.svg"
+    ls -l "fixtures/expected/handpicked/${filename%.*}.svg"
+    ls -l "target/canonicalized-svg/handpicked"
 fi
 
 

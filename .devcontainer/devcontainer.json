@@ -2,6 +2,7 @@
   "name": "drawio-rs devcontainer",
   "dockerComposeFile": "docker-compose.yml",
   "service": "workspace",
+  "updateRemoteUserUID": true,
   "customizations": {
     "vscode": {
       "containerEnv": {

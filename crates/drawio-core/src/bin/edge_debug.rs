@@ -3,7 +3,9 @@ mod real {
     use drawio_core::generate_svg;
     use drawio_core::model::MxCell;
     use drawio_core::parse_mxfile;
-    use drawio_core::svg::{DebugEdgeGeometry, SvgResult, debug_edge_geometry};
+    use drawio_core::svg::{
+        DebugEdgeGeometry, DebugGraphBounds, SvgResult, debug_edge_geometry, debug_graph_bounds,
+    };
     use quick_xml::Reader;
     use quick_xml::events::Event;
     use serde::Serialize;
@@ -122,12 +124,20 @@ mod real {
         (paths, found_cell_ids, used_fallback)
     }
 
-    fn run() -> SvgResult<()> {
-        let mut args = std::env::args().skip(1);
-        let drawio_path = PathBuf::from(args.next().expect("drawio path"));
-        let edge_id = args.next().expect("edge id");
-        let expected_svg_path = PathBuf::from(args.next().expect("expected svg path"));
+    fn run_bounds(drawio_path: PathBuf, diagram_index: usize) -> SvgResult<()> {
+        let drawio_xml = fs::read_to_string(&drawio_path).expect("failed to read drawio input");
+        let mxfile = parse_mxfile(&drawio_xml).expect("parse mxfile");
+        let bounds: DebugGraphBounds = debug_graph_bounds(&mxfile, diagram_index)?;
+        let output = serde_json::to_string_pretty(&bounds).expect("serialize bounds report");
+        println!("{output}");
+        Ok(())
+    }
 
+    fn run_edge_debug(
+        drawio_path: PathBuf,
+        edge_id: String,
+        expected_svg_path: PathBuf,
+    ) -> SvgResult<()> {
         let drawio_xml = fs::read_to_string(&drawio_path).expect("failed to read drawio input");
         let mxfile = parse_mxfile(&drawio_xml).expect("parse mxfile");
         let diagram = mxfile
@@ -168,6 +178,32 @@ mod real {
         let output = serde_json::to_string_pretty(&report).expect("serialize report");
         println!("{output}");
         Ok(())
+    }
+
+    fn run() -> SvgResult<()> {
+        let mut args = std::env::args().skip(1);
+        let Some(first) = args.next() else {
+            eprintln!(
+                "usage: edge_debug bounds <drawio> [diagram_index]\n\
+                usage: edge_debug <drawio> <edge_id> <expected_svg>"
+            );
+            std::process::exit(2);
+        };
+
+        if first == "bounds" {
+            let drawio_path = PathBuf::from(args.next().expect("drawio path"));
+            let diagram_index = args
+                .next()
+                .map(|value| value.parse::<usize>().expect("diagram_index"))
+                .unwrap_or(0);
+            return run_bounds(drawio_path, diagram_index);
+        }
+
+        let drawio_path = PathBuf::from(first);
+        let edge_id = args.next().expect("edge id");
+        let expected_svg_path = PathBuf::from(args.next().expect("expected svg path"));
+
+        run_edge_debug(drawio_path, edge_id, expected_svg_path)
     }
 
     pub fn main() {
