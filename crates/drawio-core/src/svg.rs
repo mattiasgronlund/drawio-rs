@@ -1746,7 +1746,10 @@ fn edge_line_paths(
         let segment = style_value(style, "segment")
             .and_then(|value| value.parse::<f64>().ok())
             .unwrap_or(20.0);
-        return vec![entity_relation_path(edge_path, min_x, min_y, segment)];
+        let extra = entity_relation_segment_extra(style);
+        return vec![entity_relation_path(
+            edge_path, min_x, min_y, segment, extra,
+        )];
     }
     if style_value(style, "curved") == Some("1") {
         return vec![curved_edge_path(edge_path, min_x, min_y)];
@@ -1772,6 +1775,34 @@ fn edge_line_paths(
         miterlimit: None,
         pointer_events: "stroke",
     }]
+}
+
+fn entity_relation_segment_extra(style: Option<&str>) -> f64 {
+    let stroke_width = stroke_width_value(style);
+    let start_kind = marker_kind_from_value(style_value(style, "startArrow"));
+    let end_kind = match style_value(style, "endArrow") {
+        Some("none") => None,
+        Some(value) => marker_kind_from_value(Some(value)),
+        None => Some(MarkerKind::Classic),
+    };
+    let mut extra = 0.0;
+    for kind in [start_kind, end_kind] {
+        let value = match kind {
+            Some(MarkerKind::Circle) | Some(MarkerKind::CirclePlus) => 2.0 * stroke_width,
+            Some(MarkerKind::ERzeroToOne) | Some(MarkerKind::ERzeroToMany) => {
+                1.25 * stroke_width + 0.5
+            }
+            Some(MarkerKind::DoubleBlock) => {
+                let (tip_gap, arrow_length, arrow_back, _) = edge_arrow_metrics(stroke_width);
+                arrow_length + arrow_back - tip_gap + 0.03
+            }
+            _ => 0.0,
+        };
+        if value > extra {
+            extra = value;
+        }
+    }
+    extra
 }
 
 fn flex_arrow_paths(
@@ -2499,7 +2530,15 @@ fn dash_pattern_attr(style: Option<&str>) -> String {
         return format!(" stroke-dasharray=\"{}\"", parts.join(" "));
     }
     if is_dashed(style) {
-        return " stroke-dasharray=\"3 3\"".to_string();
+        let scale = stroke_width_value(style);
+        if (scale - 1.0).abs() <= f64::EPSILON {
+            return " stroke-dasharray=\"3 3\"".to_string();
+        }
+        return format!(
+            " stroke-dasharray=\"{} {}\"",
+            fmt_num(3.0 * scale),
+            fmt_num(3.0 * scale)
+        );
     }
     String::new()
 }
@@ -2508,7 +2547,13 @@ fn edge_stroke_attrs(style: Option<&str>) -> (String, String) {
     let stroke_color = style_value(style, "strokeColor");
     let stroke = match stroke_color {
         Some("none") => "none".to_string(),
-        Some(value) => normalize_color_value(value),
+        Some(value) => {
+            if let Some(pair) = light_dark_pair(value) {
+                normalize_color_value(&pair.light)
+            } else {
+                normalize_color_value(value)
+            }
+        }
         None => "#000000".to_string(),
     };
     let mut style_parts: Vec<String> = Vec::new();
@@ -2713,6 +2758,7 @@ fn entity_relation_path(
     min_x: f64,
     min_y: f64,
     segment: f64,
+    extra: f64,
 ) -> EdgeLineSegment {
     let points = entity_relation_points(edge_path, segment);
 
@@ -2766,12 +2812,29 @@ fn entity_relation_path(
     )
     .unwrap();
 
+    let dir = entity_relation_dir(edge_path);
+    let source_segment = if points.len() > 1 && extra != 0.0 {
+        Point {
+            x: points[1].x + dir.x * extra,
+            y: points[1].y + dir.y * extra,
+        }
+    } else {
+        points.get(1).copied().unwrap_or(points[0])
+    };
+    let target_segment = if points.len() > 4 && extra != 0.0 {
+        Point {
+            x: points[4].x - dir.x * extra,
+            y: points[4].y - dir.y * extra,
+        }
+    } else {
+        points.get(4).copied().unwrap_or(*points.last().unwrap())
+    };
+
     if points.len() > 1 {
         write!(d, " L").unwrap();
-        write_point(points[1], &mut d);
+        write_point(source_segment, &mut d);
     }
     if points.len() > 2 {
-        let dir = entity_relation_dir(edge_path);
         let half = segment / 2.0;
         let control = if dir.x.abs() >= dir.y.abs() {
             Point {
@@ -2799,7 +2862,6 @@ fn entity_relation_path(
         write_point(points[3], &mut d);
     }
     if points.len() > 4 {
-        let dir = entity_relation_dir(edge_path);
         let half = segment / 2.0;
         let control = if dir.x.abs() >= dir.y.abs() {
             Point {
@@ -2817,8 +2879,8 @@ fn entity_relation_path(
             " Q {} {} {} {}",
             fmt_num(control.x - min_x),
             fmt_num(control.y - min_y),
-            fmt_num(points[4].x - min_x),
-            fmt_num(points[4].y - min_y)
+            fmt_num(target_segment.x - min_x),
+            fmt_num(target_segment.y - min_y)
         )
         .unwrap();
     }
@@ -2863,10 +2925,20 @@ fn entity_relation_curved_path(
     let same_dir = (edge_path.start_dir.x * edge_path.end_dir.x
         + edge_path.start_dir.y * edge_path.end_dir.y)
         > 0.0;
-    if !same_dir {
-        control_start = control_end;
-    }
     let horizontal = edge_path.start_dir.x.abs() >= edge_path.start_dir.y.abs();
+    if !same_dir {
+        control_start = if horizontal {
+            Point {
+                x: control_end.x,
+                y: start.y,
+            }
+        } else {
+            Point {
+                x: start.x,
+                y: control_end.y,
+            }
+        };
+    }
     let mid = if same_dir {
         Point {
             x: (control_start.x + control_end.x) / 2.0,
@@ -4870,7 +4942,7 @@ fn marker_line_offset(
         | Some(MarkerKind::ERmandOne)
         | Some(MarkerKind::ERmany)
         | Some(MarkerKind::ERoneToMany) => 0.0,
-        Some(MarkerKind::ERzeroToOne) | Some(MarkerKind::ERzeroToMany) => stroke_width * 6.0,
+        Some(MarkerKind::ERzeroToOne) | Some(MarkerKind::ERzeroToMany) => stroke_width * 6.0 + 0.5,
         Some(MarkerKind::Oval) => 3.0 * stroke_width,
         Some(MarkerKind::Diamond) => {
             if (stroke_width - 1.0).abs() < f64::EPSILON {
@@ -5069,11 +5141,24 @@ fn render_marker(
             .unwrap();
         }
         MarkerKind::OpenAsync => {
-            let tip = to_world(Point { x: tip_gap, y: 0.0 });
-            let back = to_world(Point {
-                x: tip_gap + arrow_length + arrow_back,
+            let local_tip_gap = 0.0;
+            let tip = to_world(Point {
+                x: local_tip_gap,
+                y: 0.0,
+            });
+            let back_up = to_world(Point {
+                x: local_tip_gap + arrow_length + arrow_back,
                 y: -arrow_half_height,
             });
+            let back_down = to_world(Point {
+                x: local_tip_gap + arrow_length + arrow_back,
+                y: arrow_half_height,
+            });
+            let back = if back_up.y <= back_down.y {
+                back_up
+            } else {
+                back_down
+            };
             write!(
                 out,
                 "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
@@ -5184,13 +5269,26 @@ fn render_marker(
         }
         MarkerKind::Async => {
             let back_len = arrow_length + arrow_back;
-            let tip = to_world(Point { x: tip_gap, y: 0.0 });
-            let upper = to_world(Point {
-                x: tip_gap + back_len,
+            let local_tip_gap = tip_gap;
+            let tip = to_world(Point {
+                x: local_tip_gap,
+                y: 0.0,
+            });
+            let upper_up = to_world(Point {
+                x: local_tip_gap + back_len,
                 y: -arrow_half_height,
             });
+            let upper_down = to_world(Point {
+                x: local_tip_gap + back_len,
+                y: arrow_half_height,
+            });
+            let upper = if upper_up.y <= upper_down.y {
+                upper_up
+            } else {
+                upper_down
+            };
             let base = to_world(Point {
-                x: tip_gap + back_len,
+                x: local_tip_gap + back_len,
                 y: 0.0,
             });
             write!(
@@ -5371,7 +5469,7 @@ fn render_marker(
                 .unwrap();
             }
         }
-        MarkerKind::BaseDash | MarkerKind::ERone => {
+        MarkerKind::BaseDash => {
             let length = 9.0;
             let top = to_world(Point {
                 x: 0.0,
@@ -5394,9 +5492,33 @@ fn render_marker(
             )
             .unwrap();
         }
+        MarkerKind::ERone => {
+            let length = 9.0;
+            let top = to_world(Point {
+                x: 4.5,
+                y: -length / 2.0,
+            });
+            let bottom = to_world(Point {
+                x: 4.5,
+                y: length / 2.0,
+            });
+            write!(
+                out,
+                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                fmt_num(top.x - min_x),
+                fmt_num(top.y - min_y),
+                fmt_num(bottom.x - min_x),
+                fmt_num(bottom.y - min_y),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
+        }
         MarkerKind::ERmandOne => {
             let length = 9.0;
             let offsets = [4.5, 9.0];
+            let mut d = String::new();
             for offset in offsets {
                 let top = to_world(Point {
                     x: offset,
@@ -5407,18 +5529,24 @@ fn render_marker(
                     y: length / 2.0,
                 });
                 write!(
-                    out,
-                    "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                    d,
+                    " M {} {} L {} {}",
                     fmt_num(top.x - min_x),
                     fmt_num(top.y - min_y),
                     fmt_num(bottom.x - min_x),
-                    fmt_num(bottom.y - min_y),
-                    stroke_attr,
-                    stroke_width_attr,
-                    marker_style_attr
+                    fmt_num(bottom.y - min_y)
                 )
                 .unwrap();
             }
+            write!(
+                out,
+                "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                d.trim_start(),
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
         }
         MarkerKind::ERmany => {
             let a = to_world(Point { x: 0.0, y: 5.0 });
@@ -5449,19 +5577,34 @@ fn render_marker(
                 x: 10.0,
                 y: line_len / 2.0,
             });
+            let a = to_world(Point { x: 0.0, y: 5.0 });
+            let b = to_world(Point { x: 10.0, y: 0.0 });
+            let c = to_world(Point { x: 0.0, y: -5.0 });
+            let mut d = String::new();
             write!(
-                out,
-                "<path d=\"M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                d,
+                "M {} {} L {} {} M {} {} L {} {} L {} {}",
                 fmt_num(top.x - min_x),
                 fmt_num(top.y - min_y),
                 fmt_num(bottom.x - min_x),
                 fmt_num(bottom.y - min_y),
+                fmt_num(a.x - min_x),
+                fmt_num(a.y - min_y),
+                fmt_num(b.x - min_x),
+                fmt_num(b.y - min_y),
+                fmt_num(c.x - min_x),
+                fmt_num(c.y - min_y)
+            )
+            .unwrap();
+            write!(
+                out,
+                "<path d=\"{}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                d,
                 stroke_attr,
                 stroke_width_attr,
                 marker_style_attr
             )
             .unwrap();
-            out.push_str(&render_marker(MarkerKind::ERmany, anchor, dir, false, ctx));
         }
         MarkerKind::ERzeroToOne => {
             let radius = stroke_width;
@@ -5486,6 +5629,7 @@ fn render_marker(
             let v_bottom = to_world(Point { x: 5.0, y: 5.0 });
             let h_left = to_world(Point { x: 0.0, y: 0.0 });
             let h_right = to_world(Point { x: 11.5, y: 0.0 });
+            let (h_start, h_end) = (h_right, h_left);
             write!(
                 out,
                 "<path d=\"M {} {} L {} {} M {} {} L {} {}\" fill=\"none\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
@@ -5493,10 +5637,10 @@ fn render_marker(
                 fmt_num(v_top.y - min_y),
                 fmt_num(v_bottom.x - min_x),
                 fmt_num(v_bottom.y - min_y),
-                fmt_num(h_left.x - min_x),
-                fmt_num(h_left.y - min_y),
-                fmt_num(h_right.x - min_x),
-                fmt_num(h_right.y - min_y),
+                fmt_num(h_start.x - min_x),
+                fmt_num(h_start.y - min_y),
+                fmt_num(h_end.x - min_x),
+                fmt_num(h_end.y - min_y),
                 stroke_attr,
                 stroke_width_attr,
                 marker_style_attr
@@ -5547,6 +5691,7 @@ fn render_marker(
         }
         MarkerKind::DoubleBlock => {
             let back_len = arrow_length + arrow_back;
+            let mut d = String::new();
             for idx in 0..2 {
                 let tip_x = tip_gap + back_len * idx as f64;
                 let tip = to_world(Point { x: tip_x, y: 0.0 });
@@ -5559,21 +5704,27 @@ fn render_marker(
                     y: arrow_half_height,
                 });
                 write!(
-                    out,
-                    "<path d=\"M {} {} L {} {} L {} {} Z\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                    d,
+                    " M {} {} L {} {} L {} {} Z",
                     fmt_num(tip.x - min_x),
                     fmt_num(tip.y - min_y),
                     fmt_num(upper.x - min_x),
                     fmt_num(upper.y - min_y),
                     fmt_num(lower.x - min_x),
-                    fmt_num(lower.y - min_y),
-                    fill_value,
-                    stroke_attr,
-                    stroke_width_attr,
-                    marker_style_attr
+                    fmt_num(lower.y - min_y)
                 )
                 .unwrap();
             }
+            write!(
+                out,
+                "<path d=\"{}\" fill=\"{}\" stroke=\"{}\" stroke-miterlimit=\"10\" pointer-events=\"all\"{}{} />",
+                d.trim_start(),
+                fill_value,
+                stroke_attr,
+                stroke_width_attr,
+                marker_style_attr
+            )
+            .unwrap();
         }
     }
     out
