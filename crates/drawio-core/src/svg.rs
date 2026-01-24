@@ -2747,11 +2747,6 @@ fn entity_relation_path(
         };
     }
 
-    let midpoint = |a: Point, b: Point| Point {
-        x: (a.x + b.x) / 2.0,
-        y: (a.y + b.y) / 2.0,
-    };
-
     let mut d = String::new();
     let write_point = |point: Point, out: &mut String| {
         write!(
@@ -2776,17 +2771,17 @@ fn entity_relation_path(
         write_point(points[1], &mut d);
     }
     if points.len() > 2 {
-        let mid = midpoint(points[1], points[2]);
         let dir = entity_relation_dir(edge_path);
+        let half = segment / 2.0;
         let control = if dir.x.abs() >= dir.y.abs() {
             Point {
-                x: mid.x,
+                x: points[1].x + dir.x * half,
                 y: points[1].y,
             }
         } else {
             Point {
                 x: points[1].x,
-                y: mid.y,
+                y: points[1].y + dir.y * half,
             }
         };
         write!(
@@ -2804,17 +2799,17 @@ fn entity_relation_path(
         write_point(points[3], &mut d);
     }
     if points.len() > 4 {
-        let mid = midpoint(points[3], points[4]);
         let dir = entity_relation_dir(edge_path);
+        let half = segment / 2.0;
         let control = if dir.x.abs() >= dir.y.abs() {
             Point {
-                x: mid.x,
+                x: points[4].x - dir.x * half,
                 y: points[4].y,
             }
         } else {
             Point {
                 x: points[4].x,
-                y: mid.y,
+                y: points[4].y - dir.y * half,
             }
         };
         write!(
@@ -2856,7 +2851,7 @@ fn entity_relation_curved_path(
         .last()
         .copied()
         .unwrap_or(edge_path.target_anchor);
-    let control_start = Point {
+    let mut control_start = Point {
         x: start.x + edge_path.start_dir.x * segment,
         y: start.y + edge_path.start_dir.y * segment,
     };
@@ -2864,50 +2859,57 @@ fn entity_relation_curved_path(
         x: end.x - edge_path.end_dir.x * segment,
         y: end.y - edge_path.end_dir.y * segment,
     };
-    let points = [start, control_start, control_end, end];
-    curved_path_from_points(&points, min_x, min_y)
-}
 
-fn curved_path_from_points(points: &[Point], min_x: f64, min_y: f64) -> EdgeLineSegment {
-    let mut d = String::new();
-    if let Some(first) = points.first() {
-        write!(
-            d,
-            "M {} {}",
-            fmt_num(first.x - min_x),
-            fmt_num(first.y - min_y)
-        )
-        .unwrap();
+    let same_dir = (edge_path.start_dir.x * edge_path.end_dir.x
+        + edge_path.start_dir.y * edge_path.end_dir.y)
+        > 0.0;
+    if !same_dir {
+        control_start = control_end;
     }
-    if points.len() >= 3 {
-        for window in points[1..points.len() - 1].windows(2) {
-            let control = window[0];
-            let end = Point {
-                x: (window[0].x + window[1].x) / 2.0,
-                y: (window[0].y + window[1].y) / 2.0,
-            };
-            write!(
-                d,
-                " Q {} {} {} {}",
-                fmt_num(control.x - min_x),
-                fmt_num(control.y - min_y),
-                fmt_num(end.x - min_x),
-                fmt_num(end.y - min_y)
-            )
-            .unwrap();
+    let horizontal = edge_path.start_dir.x.abs() >= edge_path.start_dir.y.abs();
+    let mid = if same_dir {
+        Point {
+            x: (control_start.x + control_end.x) / 2.0,
+            y: (control_start.y + control_end.y) / 2.0,
         }
-        let control = points[points.len() - 2];
-        let last = points[points.len() - 1];
-        write!(
-            d,
-            " Q {} {} {} {}",
-            fmt_num(control.x - min_x),
-            fmt_num(control.y - min_y),
-            fmt_num(last.x - min_x),
-            fmt_num(last.y - min_y)
-        )
-        .unwrap();
-    }
+    } else if horizontal {
+        Point {
+            x: control_end.x,
+            y: (start.y + end.y) / 2.0,
+        }
+    } else {
+        Point {
+            x: (start.x + end.x) / 2.0,
+            y: control_end.y,
+        }
+    };
+
+    let mut d = String::new();
+    write!(
+        d,
+        "M {} {}",
+        fmt_num(start.x - min_x),
+        fmt_num(start.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " Q {} {} {} {}",
+        fmt_num(control_start.x - min_x),
+        fmt_num(control_start.y - min_y),
+        fmt_num(mid.x - min_x),
+        fmt_num(mid.y - min_y)
+    )
+    .unwrap();
+    write!(
+        d,
+        " Q {} {} {} {}",
+        fmt_num(control_end.x - min_x),
+        fmt_num(control_end.y - min_y),
+        fmt_num(end.x - min_x),
+        fmt_num(end.y - min_y)
+    )
+    .unwrap();
     EdgeLineSegment {
         d,
         fill: None,
@@ -3138,8 +3140,8 @@ fn entity_relation_points(edge_path: &EdgePath, segment: f64) -> Vec<Point> {
         y: source_segment.y + dir.y * curve_x + perp.y * curve_y,
     };
     let curve_end = Point {
-        x: target_segment.x - dir.x * curve_x + perp.x * curve_y,
-        y: target_segment.y - dir.y * curve_x + perp.y * curve_y,
+        x: target_segment.x - dir.x * curve_x - perp.x * curve_y,
+        y: target_segment.y - dir.y * curve_x - perp.y * curve_y,
     };
     vec![
         start,

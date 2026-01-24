@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+import argparse
+import re
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Optional
+
+
+def local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def extract_prolog(content: str) -> tuple[str, str]:
+    xml_decl_match = re.match(r"\s*<\?xml[^>]*\?>\s*", content)
+    xml_decl = xml_decl_match.group(0) if xml_decl_match else ""
+
+    doctype_match = re.search(r"<!DOCTYPE[^>]*>\s*", content)
+    doctype = doctype_match.group(0) if doctype_match else ""
+
+    return xml_decl, doctype
+
+
+def normalize_prolog(prolog: str) -> str:
+    if not prolog:
+        return ""
+    return prolog if prolog.endswith("\n") else f"{prolog}\n"
+
+
+def should_remove_image(elem: ET.Element) -> bool:
+    href = elem.attrib.get("{http://www.w3.org/1999/xlink}href")
+    if href is None:
+        href = elem.attrib.get("href")
+    return href is not None and href.startswith("data:image/png")
+
+
+def strip_png_fallbacks(svg_content: str) -> str:
+    xml_decl, doctype = extract_prolog(svg_content)
+    root = ET.fromstring(svg_content)
+
+    for switch in root.iter():
+        if local_name(switch.tag) != "switch":
+            continue
+        has_foreign_object = any(
+            local_name(node.tag) == "foreignObject" for node in switch.iter()
+        )
+        if not has_foreign_object:
+            continue
+
+        for parent in switch.iter():
+            for child in list(parent):
+                if local_name(child.tag) == "image" and should_remove_image(child):
+                    parent.remove(child)
+
+    serialized = ET.tostring(root, encoding="unicode")
+    prolog = normalize_prolog(xml_decl) + normalize_prolog(doctype)
+    return f"{prolog}{serialized}"
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Remove draw.io PNG text fallbacks from SVG files when a foreignObject is present."
+        )
+    )
+    parser.add_argument("svg", nargs="+", help="SVG files to update")
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+
+    for filename in args.svg:
+        path = Path(filename)
+        content = path.read_text(encoding="utf-8")
+        updated = strip_png_fallbacks(content)
+        if updated != content:
+            path.write_text(updated, encoding="utf-8")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
