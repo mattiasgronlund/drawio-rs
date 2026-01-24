@@ -972,7 +972,7 @@ fn bounds_for_graph(
                     Some(value) => marker_kind_from_value(Some(value)),
                     None => Some(MarkerKind::Classic),
                 };
-                if start_kind.is_some() {
+                if let Some(kind) = start_kind {
                     expand_marker_bounds(
                         &mut min_x,
                         &mut min_y,
@@ -980,10 +980,12 @@ fn bounds_for_graph(
                         &mut max_y,
                         edge_path.source_anchor,
                         edge_path.start_dir,
+                        kind,
+                        stroke_width,
                         metrics,
                     );
                 }
-                if end_kind.is_some() {
+                if let Some(kind) = end_kind {
                     expand_marker_bounds(
                         &mut min_x,
                         &mut min_y,
@@ -994,6 +996,8 @@ fn bounds_for_graph(
                             x: -edge_path.end_dir.x,
                             y: -edge_path.end_dir.y,
                         },
+                        kind,
+                        stroke_width,
                         metrics,
                     );
                 }
@@ -1016,8 +1020,23 @@ fn bounds_for_graph(
         }
     }
 
+    if extra_width > 0.0 || extra_height > 0.0 {
+        let padding = extra_height;
+        min_x -= padding;
+        min_y -= padding;
+        extra_width = (extra_width - padding).max(0.0);
+    }
+
+    let raw_min_x = min_x;
+    let raw_min_y = min_y;
     let min_x = min_x.floor();
     let min_y = min_y.floor();
+    if extra_width > 0.0 {
+        extra_width = (extra_width - (raw_min_x - min_x)).max(0.0);
+    }
+    if extra_height > 0.0 {
+        extra_height = (extra_height - (raw_min_y - min_y)).max(0.0);
+    }
     let width = (max_x - min_x + extra_width).round();
     let height = (max_y - min_y + extra_height).round();
     Ok((min_x, min_y, width, height))
@@ -1257,7 +1276,7 @@ fn debug_bounds_for_graph(
             };
             marker_start_kind = start_kind.map(|kind| format!("{:?}", kind));
             marker_end_kind = end_kind.map(|kind| format!("{:?}", kind));
-            if start_kind.is_some() {
+            if let Some(kind) = start_kind {
                 let mut mmin_x = f64::MAX;
                 let mut mmin_y = f64::MAX;
                 let mut mmax_x = f64::MIN;
@@ -1269,6 +1288,8 @@ fn debug_bounds_for_graph(
                     &mut mmax_y,
                     edge_path.source_anchor,
                     edge_path.start_dir,
+                    kind,
+                    stroke_width,
                     metrics,
                 );
                 if mmin_x != f64::MAX {
@@ -1279,7 +1300,7 @@ fn debug_bounds_for_graph(
                     edge_max_y = edge_max_y.max(mmax_y);
                 }
             }
-            if end_kind.is_some() {
+            if let Some(kind) = end_kind {
                 let mut mmin_x = f64::MAX;
                 let mut mmin_y = f64::MAX;
                 let mut mmax_x = f64::MIN;
@@ -1294,6 +1315,8 @@ fn debug_bounds_for_graph(
                         x: -edge_path.end_dir.x,
                         y: -edge_path.end_dir.y,
                     },
+                    kind,
+                    stroke_width,
                     metrics,
                 );
                 if mmin_x != f64::MAX {
@@ -1367,12 +1390,25 @@ fn debug_bounds_for_graph(
         });
     }
 
+    if extra_width > 0.0 || extra_height > 0.0 {
+        let padding = extra_height;
+        min_x -= padding;
+        min_y -= padding;
+        extra_width = (extra_width - padding).max(0.0);
+    }
+
     let raw_min_x = min_x;
     let raw_min_y = min_y;
     let raw_max_x = max_x;
     let raw_max_y = max_y;
     let min_x = min_x.floor();
     let min_y = min_y.floor();
+    if extra_width > 0.0 {
+        extra_width = (extra_width - (raw_min_x - min_x)).max(0.0);
+    }
+    if extra_height > 0.0 {
+        extra_height = (extra_height - (raw_min_y - min_y)).max(0.0);
+    }
     let width = (max_x - min_x + extra_width).round();
     let height = (max_y - min_y + extra_height).round();
     Ok(DebugGraphBounds {
@@ -2126,6 +2162,11 @@ fn edge_path_absolute(
         })
     };
     if style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle") {
+        let axis_dir = axis_dir_from_points(start_anchor, end_anchor);
+        if source.is_none() && target.is_none() {
+            start_dir = axis_dir;
+            end_dir = axis_dir;
+        }
         if let Some(source_cell) = source {
             start_dir = axis_dir_from_anchor(source_cell, start_anchor, cell_by_id)?;
         }
@@ -3226,8 +3267,12 @@ fn entity_relation_points(edge_path: &EdgePath, segment: f64) -> Vec<Point> {
 }
 
 fn entity_relation_dir(edge_path: &EdgePath) -> Point {
-    let dx = edge_path.target_anchor.x - edge_path.source_anchor.x;
-    let dy = edge_path.target_anchor.y - edge_path.source_anchor.y;
+    axis_dir_from_points(edge_path.source_anchor, edge_path.target_anchor)
+}
+
+fn axis_dir_from_points(start: Point, end: Point) -> Point {
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
     if dx.abs() >= dy.abs() {
         let sign = if dx >= 0.0 { 1.0 } else { -1.0 };
         Point { x: sign, y: 0.0 }
@@ -4782,6 +4827,7 @@ fn edge_arrow_metrics(stroke_width: f64) -> (f64, f64, f64, f64) {
     (1.12, 5.25, 1.75, 3.5)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn expand_marker_bounds(
     min_x: &mut f64,
     min_y: &mut f64,
@@ -4789,45 +4835,162 @@ fn expand_marker_bounds(
     max_y: &mut f64,
     anchor: Point,
     dir: Point,
+    kind: MarkerKind,
+    stroke_width: f64,
     metrics: (f64, f64, f64, f64),
 ) {
-    let (tip_gap, arrow_length, arrow_back, arrow_half_height) = metrics;
+    let (local_min_x, local_min_y, local_max_x, local_max_y) =
+        marker_local_bounds(kind, stroke_width, metrics);
     let perp = Point {
         x: -dir.y,
         y: dir.x,
     };
-    let tip = Point {
-        x: anchor.x + dir.x * tip_gap,
-        y: anchor.y + dir.y * tip_gap,
+    let to_world = |p: Point| Point {
+        x: anchor.x + dir.x * p.x + perp.x * p.y,
+        y: anchor.y + dir.y * p.x + perp.y * p.y,
     };
-    let outer = Point {
-        x: anchor.x + dir.x * (tip_gap + arrow_length + arrow_back),
-        y: anchor.y + dir.y * (tip_gap + arrow_length + arrow_back),
-    };
-    let points = [
-        tip,
+    let corners = [
         Point {
-            x: tip.x + perp.x * arrow_half_height,
-            y: tip.y + perp.y * arrow_half_height,
+            x: local_min_x,
+            y: local_min_y,
         },
         Point {
-            x: tip.x - perp.x * arrow_half_height,
-            y: tip.y - perp.y * arrow_half_height,
+            x: local_min_x,
+            y: local_max_y,
         },
         Point {
-            x: outer.x + perp.x * arrow_half_height,
-            y: outer.y + perp.y * arrow_half_height,
+            x: local_max_x,
+            y: local_min_y,
         },
         Point {
-            x: outer.x - perp.x * arrow_half_height,
-            y: outer.y - perp.y * arrow_half_height,
+            x: local_max_x,
+            y: local_max_y,
         },
     ];
-    for point in points {
+    for corner in corners {
+        let point = to_world(corner);
         *min_x = min_x.min(point.x);
         *min_y = min_y.min(point.y);
         *max_x = max_x.max(point.x);
         *max_y = max_y.max(point.y);
+    }
+}
+
+fn marker_local_bounds(
+    kind: MarkerKind,
+    stroke_width: f64,
+    metrics: (f64, f64, f64, f64),
+) -> (f64, f64, f64, f64) {
+    let (tip_gap, arrow_length, arrow_back, arrow_half_height) = metrics;
+    match kind {
+        MarkerKind::Classic | MarkerKind::ClassicThin => {
+            let half_height = if kind == MarkerKind::ClassicThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            (
+                tip_gap,
+                -half_height,
+                tip_gap + arrow_length + arrow_back,
+                half_height,
+            )
+        }
+        MarkerKind::Open | MarkerKind::OpenThin => {
+            let half_height = if kind == MarkerKind::OpenThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            (
+                tip_gap,
+                -half_height,
+                tip_gap + arrow_length + arrow_back,
+                half_height,
+            )
+        }
+        MarkerKind::OpenAsync => (
+            0.0,
+            -arrow_half_height,
+            arrow_length + arrow_back,
+            arrow_half_height,
+        ),
+        MarkerKind::Oval => {
+            let radius = 3.0 * stroke_width;
+            (-radius, -radius, radius, radius)
+        }
+        MarkerKind::Diamond | MarkerKind::DiamondThin => {
+            let half_width = 3.5;
+            let (half_height, local_tip_gap) = if kind == MarkerKind::DiamondThin {
+                (2.06, 0.99)
+            } else {
+                (3.5, 0.71)
+            };
+            (
+                local_tip_gap,
+                -half_height,
+                local_tip_gap + 2.0 * half_width,
+                half_height,
+            )
+        }
+        MarkerKind::Block | MarkerKind::BlockThin => {
+            let half_height = if kind == MarkerKind::BlockThin {
+                arrow_half_height * (2.0 / 3.0)
+            } else {
+                arrow_half_height
+            };
+            let back_len = arrow_length + arrow_back;
+            (tip_gap, -half_height, tip_gap + back_len, half_height)
+        }
+        MarkerKind::Async => {
+            let back_len = arrow_length + arrow_back;
+            (
+                tip_gap,
+                -arrow_half_height,
+                tip_gap + back_len,
+                arrow_half_height,
+            )
+        }
+        MarkerKind::Box => (0.0, -4.0, 8.0, 4.0),
+        MarkerKind::HalfCircle => (-0.0, -8.0, 8.0, 8.0),
+        MarkerKind::Dash => (4.0, -4.0, 12.0, 4.0),
+        MarkerKind::Cross => (4.5, -4.5, 13.5, 4.5),
+        MarkerKind::CirclePlus | MarkerKind::Circle => {
+            let radius = 4.0 * stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            (
+                center_offset - radius,
+                -radius,
+                center_offset + radius,
+                radius,
+            )
+        }
+        MarkerKind::BaseDash => (0.0, -4.5, 0.0, 4.5),
+        MarkerKind::ERone => (4.5, -4.5, 4.5, 4.5),
+        MarkerKind::ERmandOne => (4.5, -4.5, 9.0, 4.5),
+        MarkerKind::ERmany => (0.0, -5.0, 10.0, 5.0),
+        MarkerKind::ERoneToMany => (0.0, -5.0, 10.0, 5.0),
+        MarkerKind::ERzeroToOne => {
+            let radius = stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            let max_x = (center_offset + radius).max(11.5);
+            (0.0, -5.0, max_x, 5.0)
+        }
+        MarkerKind::ERzeroToMany => {
+            let radius = stroke_width;
+            let center_offset = 5.0 * stroke_width;
+            let max_x = (center_offset + radius).max(10.0);
+            (0.0, -5.0, max_x, 5.0)
+        }
+        MarkerKind::DoubleBlock => {
+            let back_len = arrow_length + arrow_back;
+            (
+                tip_gap,
+                -arrow_half_height,
+                tip_gap + 2.0 * back_len,
+                arrow_half_height,
+            )
+        }
     }
 }
 

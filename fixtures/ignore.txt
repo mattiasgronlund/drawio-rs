@@ -2,4 +2,3 @@
 handpicked/011-rotation.drawio
 handpicked/017-gradients.drawio
 handpicked/019-edge-routing-even_more.drawio
-handpicked/020-edge-routing-dangling-arrows.drawio
