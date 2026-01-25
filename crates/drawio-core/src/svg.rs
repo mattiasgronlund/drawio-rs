@@ -1,8 +1,12 @@
 use crate::model::{Diagram, MxCell, MxFile, MxGeometry, MxGraphModel, MxPoint};
 #[cfg(feature = "edge-debug")]
+use crate::parse_mxfile;
+#[cfg(feature = "edge-debug")]
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+#[cfg(feature = "edge-debug")]
+use std::fs;
 use std::path::Path;
 
 #[derive(Debug, thiserror::Error)]
@@ -19,8 +23,14 @@ pub enum SvgError {
     #[error("missing source or target for edge {0}")]
     MissingEdgeEndpoints(String),
 
+    #[error("missing cell {0}")]
+    MissingCell(String),
+
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("parse error: {0}")]
+    Parse(#[from] crate::parse::ParseError),
 }
 
 pub type SvgResult<T> = Result<T, SvgError>;
@@ -1011,16 +1021,23 @@ fn bounds_for_graph(
 
     let mut extra_width: f64 = 0.0;
     let mut extra_height: f64 = 0.0;
+    let mut needs_entity_relation_padding = false;
     for edge in edges {
         if edge.source.is_none() && edge.target.is_none() {
+            let stroke_width = stroke_width_value(edge.style.as_deref());
             let (tip_gap, arrow_length, arrow_back, _arrow_half_height) =
-                edge_arrow_metrics(stroke_width_value(edge.style.as_deref()));
+                edge_arrow_metrics(stroke_width);
             extra_width = extra_width.max(tip_gap + arrow_length + arrow_back);
             extra_height = extra_height.max(tip_gap);
+            let is_entity_relation =
+                style_value(edge.style.as_deref(), "edgeStyle") == Some("entityRelationEdgeStyle");
+            if is_entity_relation {
+                needs_entity_relation_padding = true;
+            }
         }
     }
 
-    if extra_width > 0.0 || extra_height > 0.0 {
+    if needs_entity_relation_padding && (extra_width > 0.0 || extra_height > 0.0) {
         let padding = extra_height;
         min_x -= padding;
         min_y -= padding;
@@ -1031,10 +1048,10 @@ fn bounds_for_graph(
     let raw_min_y = min_y;
     let min_x = min_x.floor();
     let min_y = min_y.floor();
-    if extra_width > 0.0 {
+    if needs_entity_relation_padding && extra_width > 0.0 {
         extra_width = (extra_width - (raw_min_x - min_x)).max(0.0);
     }
-    if extra_height > 0.0 {
+    if needs_entity_relation_padding && extra_height > 0.0 {
         extra_height = (extra_height - (raw_min_y - min_y)).max(0.0);
     }
     let width = (max_x - min_x + extra_width).round();
@@ -1156,6 +1173,7 @@ fn debug_bounds_for_graph(
     let mut edge_bounds = Vec::new();
     let mut extra_width: f64 = 0.0;
     let mut extra_height: f64 = 0.0;
+    let mut needs_entity_relation_padding = false;
     for edge in edges {
         let Some(edge_path) = edge_path_absolute(edge, cell_by_id)? else {
             continue;
@@ -1341,16 +1359,27 @@ fn debug_bounds_for_graph(
             max_y = max_y.max(bbox.max_y);
         }
 
-        let (edge_extra_width, edge_extra_height) =
+        let (edge_extra_width, edge_extra_height, is_entity_relation) =
             if edge.source.is_none() && edge.target.is_none() {
+                let stroke_width = stroke_width_value(edge.style.as_deref());
                 let (tip_gap, arrow_length, arrow_back, _arrow_half_height) =
-                    edge_arrow_metrics(stroke_width_value(edge.style.as_deref()));
-                (tip_gap + arrow_length + arrow_back, tip_gap)
+                    edge_arrow_metrics(stroke_width);
+                let style = edge.style.as_deref();
+                let is_entity_relation =
+                    style_value(style, "edgeStyle") == Some("entityRelationEdgeStyle");
+                (
+                    tip_gap + arrow_length + arrow_back,
+                    tip_gap,
+                    is_entity_relation,
+                )
             } else {
-                (0.0, 0.0)
+                (0.0, 0.0, false)
             };
         extra_width = extra_width.max(edge_extra_width);
         extra_height = extra_height.max(edge_extra_height);
+        if is_entity_relation {
+            needs_entity_relation_padding = true;
+        }
 
         edge_bounds.push(DebugEdgeBounds {
             id: edge.id.clone(),
@@ -1390,7 +1419,7 @@ fn debug_bounds_for_graph(
         });
     }
 
-    if extra_width > 0.0 || extra_height > 0.0 {
+    if needs_entity_relation_padding && (extra_width > 0.0 || extra_height > 0.0) {
         let padding = extra_height;
         min_x -= padding;
         min_y -= padding;
@@ -1403,10 +1432,10 @@ fn debug_bounds_for_graph(
     let raw_max_y = max_y;
     let min_x = min_x.floor();
     let min_y = min_y.floor();
-    if extra_width > 0.0 {
+    if needs_entity_relation_padding && extra_width > 0.0 {
         extra_width = (extra_width - (raw_min_x - min_x)).max(0.0);
     }
-    if extra_height > 0.0 {
+    if needs_entity_relation_padding && extra_height > 0.0 {
         extra_height = (extra_height - (raw_min_y - min_y)).max(0.0);
     }
     let width = (max_x - min_x + extra_width).round();
@@ -1427,6 +1456,7 @@ fn debug_bounds_for_graph(
     })
 }
 
+#[cfg_attr(feature = "edge-debug", derive(Serialize))]
 #[derive(Clone, Copy, Debug)]
 struct Point {
     x: f64,
@@ -4634,23 +4664,7 @@ fn edge_label_position(
     let mut parallel_offset = base_parallel + round_offset;
     let perp_offset = if is_vertical {
         if has_rotation {
-            let max_terminal_rotation = edge
-                .source
-                .as_ref()
-                .and_then(|id| cell_by_id.get(id))
-                .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
-                .unwrap_or(0.0)
-                .max(
-                    edge.target
-                        .as_ref()
-                        .and_then(|id| cell_by_id.get(id))
-                        .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
-                        .unwrap_or(0.0),
-                );
-            let rotation_factor = (1.0 - max_terminal_rotation / 75.0
-                + max_terminal_rotation / 15000.0
-                + max_terminal_rotation / 12_989_318.0)
-                .clamp(0.0, 1.0);
+            let rotation_factor = terminal_rotation_factor(edge, cell_by_id);
             parallel_offset -= (1.0 - rotation.to_radians().cos()) * rotation_factor;
             y_offset
         } else {
@@ -4677,6 +4691,26 @@ fn edge_label_position(
         x: center.x + direction.x * parallel_offset + perp.x * perp_offset,
         y: center.y + direction.y * parallel_offset + perp.y * perp_offset,
     })
+}
+
+fn terminal_rotation_factor(edge: &MxCell, cell_by_id: &BTreeMap<String, &MxCell>) -> f64 {
+    let max_source_rotation = edge
+        .source
+        .as_ref()
+        .and_then(|id| cell_by_id.get(id))
+        .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
+        .unwrap_or(0.0);
+    let max_target_rotation = edge
+        .target
+        .as_ref()
+        .and_then(|id| cell_by_id.get(id))
+        .map(|cell| rotation_degrees(cell.style.as_deref()).abs())
+        .unwrap_or(0.0);
+    let max_terminal_rotation = max_source_rotation.max(max_target_rotation);
+    (1.0 - max_terminal_rotation / 75.0
+        + max_terminal_rotation / 15000.0
+        + max_terminal_rotation / 12_989_318.0)
+        .clamp(0.0, 1.0)
 }
 
 fn render_edge_label_at(
@@ -4722,6 +4756,226 @@ fn render_edge_label_at(
     .unwrap();
     out.push_str(&close);
     Some(out)
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct EdgeLabelRotationSteps {
+    pub label_id: String,
+    pub direction: Point,
+    pub center_point: Point,
+    pub line_length: f64,
+    pub x_offset: f64,
+    pub y_offset: f64,
+    pub round_offset: f64,
+    pub base_parallel: f64,
+    pub parallel_before_rotation: f64,
+    pub has_rotation: bool,
+    pub is_vertical: bool,
+    pub rotation: f64,
+    pub rotation_factor: f64,
+    pub rotation_penalty: f64,
+    pub parallel_offset_after_rotation: f64,
+    pub perp_offset: f64,
+    pub perp_vector: Point,
+    pub final_position: Point,
+    pub final_rotate_value: f64,
+}
+
+#[cfg(feature = "edge-debug")]
+#[derive(Debug, Serialize)]
+pub struct EdgeLabelRotationReport {
+    pub drawio_path: String,
+    pub diagram_index: usize,
+    pub label_id: String,
+    pub edge_id: String,
+    pub steps: EdgeLabelRotationSteps,
+}
+
+#[cfg(feature = "edge-debug")]
+fn edge_label_rotation_steps(
+    edge: &MxCell,
+    edge_path: &EdgePath,
+    cell_by_id: &BTreeMap<String, &MxCell>,
+    geom: &MxGeometry,
+    rotation: f64,
+    label_id: &str,
+    bounds_min_x: f64,
+    bounds_min_y: f64,
+) -> SvgResult<EdgeLabelRotationSteps> {
+    let (center, direction) = point_along_polyline(&edge_path.line_points, 0.5)
+        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
+    let line_length = polyline_length(&edge_path.line_points);
+    let x_offset = geom.x.unwrap_or(0.0);
+    let y_offset = geom.y.unwrap_or(0.0);
+    let has_rotation = rotation.abs() > f64::EPSILON;
+    let is_vertical = direction.y.abs() >= direction.x.abs();
+    let round_offset = (x_offset * line_length / 2.0).round();
+    let base_parallel = 1.0 + (edge_path.end_offset - edge_path.start_offset) / 2.0;
+    let mut parallel_offset = base_parallel + round_offset;
+    println!(
+        "parallel_offset = 1.0 + (edge_path.end_offset - edge_path.start_offset) / 2.0 + round_offset"
+    );
+    println!(
+        "{0} = 1.0 + ({1} - {2}) / 2.0 + {3}",
+        parallel_offset, edge_path.end_offset, edge_path.start_offset, round_offset
+    );
+
+    let parallel_before_rotation = parallel_offset;
+    let mut rotation_factor = 0.0;
+    let mut rotation_penalty = 0.0;
+    let perp_offset = if is_vertical {
+        if has_rotation {
+            let old_parallel_offset = parallel_offset;
+            rotation_factor = terminal_rotation_factor(edge, cell_by_id);
+            rotation_penalty = (1.0 - rotation.to_radians().cos()) * rotation_factor;
+            parallel_offset -= rotation_penalty;
+            println!(
+                "parallel_offset = parallel_offset - (1.0 - rotation.to_radians().cos()) * terminal_rotation_factor(edge, cell_by_id)"
+            );
+            println!(
+                "{0} = {1} - (1.0 - {2}) * {3}",
+                parallel_offset,
+                old_parallel_offset,
+                rotation.to_radians().cos(),
+                terminal_rotation_factor(edge, cell_by_id)
+            );
+            y_offset
+        } else {
+            1.0 + y_offset
+        }
+    } else if has_rotation {
+        let old_parallel_offset = parallel_offset;
+        parallel_offset -= 1.0;
+        println!(
+            "parallel_offset = parallel_offset - (1.0 - rotation.to_radians().cos()) * terminal_rotation_factor(edge, cell_by_id)"
+        );
+        println!(
+            "{0} = {1} - (1.0 - {2}) * {3}",
+            parallel_offset,
+            old_parallel_offset,
+            rotation.to_radians().cos(),
+            terminal_rotation_factor(edge, cell_by_id)
+        );
+        1.0 - y_offset - (1.0 - rotation.to_radians().cos())
+    } else {
+        1.0 - y_offset
+    };
+    let perp_vector = if is_vertical {
+        Point {
+            x: direction.y,
+            y: -direction.x,
+        }
+    } else {
+        Point {
+            x: -direction.y,
+            y: direction.x,
+        }
+    };
+    let final_position = Point {
+        x: center.x + direction.x * parallel_offset + perp_vector.x * perp_offset - bounds_min_x,
+        y: center.y + direction.y * parallel_offset + perp_vector.y * perp_offset - bounds_min_y,
+    };
+
+    println!(
+        "final_position = center.y + direction.y * parallel_offset + perp_vector_y + perp_offset - bounds_min_y"
+    );
+    println!(
+        "{0}= {1} + {2} * {3} + {4} + {5} - {6}",
+        final_position.y,
+        center.y,
+        direction.y,
+        parallel_offset,
+        perp_vector.y,
+        perp_offset,
+        bounds_min_y
+    );
+
+    Ok(EdgeLabelRotationSteps {
+        label_id: label_id.to_string(),
+        direction,
+        center_point: center,
+        line_length,
+        x_offset,
+        y_offset,
+        round_offset,
+        base_parallel,
+        parallel_before_rotation,
+        has_rotation,
+        is_vertical,
+        rotation,
+        rotation_factor,
+        rotation_penalty,
+        parallel_offset_after_rotation: parallel_offset,
+        perp_offset,
+        perp_vector,
+        final_position,
+        final_rotate_value: final_position.y,
+    })
+}
+
+#[cfg(feature = "edge-debug")]
+pub fn debug_edge_label_rotation_from_drawio(
+    drawio_path: &Path,
+    diagram_index: usize,
+    label_id: &str,
+) -> SvgResult<EdgeLabelRotationReport> {
+    let drawio_xml = fs::read_to_string(drawio_path)?;
+    let mxfile = parse_mxfile(&drawio_xml)?;
+    let bounds = debug_graph_bounds(&mxfile, diagram_index)?;
+    let bounds_min_x = bounds.min_x;
+    let bounds_min_y = bounds.min_y;
+    let diagram = mxfile
+        .diagrams
+        .get(diagram_index)
+        .ok_or(SvgError::MissingDiagram(diagram_index))?;
+    let graph = diagram
+        .graph_model
+        .as_ref()
+        .ok_or(SvgError::MissingGraphModel)?;
+    let mut cell_by_id = BTreeMap::new();
+    for cell in &graph.root.cells {
+        cell_by_id.insert(cell.id.clone(), cell);
+    }
+    for cell in &graph.user_objects {
+        cell_by_id.insert(cell.id.clone(), cell);
+    }
+    let label_cell = cell_by_id
+        .get(label_id)
+        .copied()
+        .ok_or_else(|| SvgError::MissingCell(label_id.to_string()))?;
+    let edge_id = label_cell
+        .parent
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingCell(label_id.to_string()))?;
+    let edge = cell_by_id
+        .get(edge_id)
+        .copied()
+        .ok_or_else(|| SvgError::MissingCell(edge_id.clone()))?;
+    let geom = label_cell
+        .geometry
+        .as_ref()
+        .ok_or_else(|| SvgError::MissingGeometry(label_id.to_string()))?;
+    let rotation = rotation_degrees(label_cell.style.as_deref());
+    let edge_path = edge_path_absolute(edge, &cell_by_id)?
+        .ok_or_else(|| SvgError::MissingEdgeEndpoints(edge.id.clone()))?;
+    let steps = edge_label_rotation_steps(
+        edge,
+        &edge_path,
+        &cell_by_id,
+        geom,
+        rotation,
+        label_id,
+        bounds_min_x,
+        bounds_min_y,
+    )?;
+    Ok(EdgeLabelRotationReport {
+        drawio_path: drawio_path.display().to_string(),
+        diagram_index,
+        label_id: label_id.to_string(),
+        edge_id: edge.id.clone(),
+        steps,
+    })
 }
 
 const WARNING_SWITCH: &str = "<switch><g requiredFeatures=\"http://www.w3.org/TR/SVG11/feature#Extensibility\"/><a transform=\"translate(0,-5)\" xlink:href=\"https://www.drawio.com/doc/faq/svg-export-text-problems\" target=\"_blank\"><text text-anchor=\"middle\" font-size=\"10px\" x=\"50%\" y=\"100%\">Unsupported SVG features detected.\nPlease view this diagram in a modern web browser.</text></a></switch>";

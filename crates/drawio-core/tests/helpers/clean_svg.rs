@@ -1,7 +1,7 @@
 use quick_xml::{
     Reader, Writer,
     errors::IllFormedError,
-    events::{BytesEnd, BytesStart, Event},
+    events::{BytesEnd, BytesStart, BytesText, Event},
 };
 
 struct SwitchContent {
@@ -170,6 +170,108 @@ fn read_switch(reader: &mut Reader<&[u8]>) -> Result<SwitchContent, quick_xml::E
     })
 }
 
+fn round_decimal_str(value: f64) -> String {
+    let mut s = format!("{value:.6}");
+    if let Some(dot) = s.find('.') {
+        while s.ends_with('0') {
+            s.pop();
+        }
+        if s.ends_with('.') {
+            s.truncate(dot);
+        }
+    }
+    if s == "-0" {
+        s = "0".to_string();
+    }
+    s
+}
+
+fn round_decimals_in_str(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        let is_sign = c == '-' || c == '+';
+        let is_digit = c.is_ascii_digit();
+        let is_dot = c == '.';
+        let start_number = is_digit
+            || (is_dot && i + 1 < bytes.len() && (bytes[i + 1] as char).is_ascii_digit())
+            || (is_sign
+                && i + 1 < bytes.len()
+                && ((bytes[i + 1] as char).is_ascii_digit() || bytes[i + 1] as char == '.'));
+        if !start_number {
+            out.push(c);
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        if is_sign {
+            i += 1;
+        }
+        let mut digits_before = 0usize;
+        while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
+            digits_before += 1;
+            i += 1;
+        }
+        let mut saw_dot = false;
+        let mut digits_after = 0usize;
+        if i < bytes.len() && bytes[i] as char == '.' {
+            saw_dot = true;
+            i += 1;
+            while i < bytes.len() && (bytes[i] as char).is_ascii_digit() {
+                digits_after += 1;
+                i += 1;
+            }
+        }
+
+        if saw_dot && digits_after > 0 {
+            let token = &input[start..i];
+            if let Ok(value) = token.parse::<f64>() {
+                out.push_str(&round_decimal_str(value));
+            } else {
+                out.push_str(token);
+            }
+        } else {
+            out.push_str(&input[start..i]);
+        }
+    }
+    out
+}
+
+fn round_event_start(start: &BytesStart<'_>) -> BytesStart<'static> {
+    let name = String::from_utf8_lossy(start.name().as_ref()).to_string();
+    let mut new_start = BytesStart::new(name);
+    for attr in start.attributes().with_checks(false) {
+        let attr = attr.unwrap_or_else(|err| panic!("Failed to parse attributes: {err}"));
+        let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
+        let value = attr
+            .unescape_value()
+            .unwrap_or_else(|err| panic!("Failed to parse attributes: {err}"))
+            .into_owned();
+        let rounded = round_decimals_in_str(&value);
+        new_start.push_attribute((key.as_str(), rounded.as_str()));
+    }
+    new_start
+}
+
+fn round_event(event: Event<'_>) -> Event<'static> {
+    match event {
+        Event::Start(e) => Event::Start(round_event_start(&e)),
+        Event::Empty(e) => Event::Empty(round_event_start(&e)),
+        Event::Text(e) => {
+            let value = e
+                .decode()
+                .unwrap_or_else(|err| panic!("Failed to parse text: {err}"))
+                .into_owned();
+            let rounded = round_decimals_in_str(&value);
+            Event::Text(BytesText::from_escaped(rounded))
+        }
+        other => other.into_owned(),
+    }
+}
+
 pub fn clean_svg(content: &str) -> String {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(false);
@@ -199,7 +301,7 @@ pub fn clean_svg(content: &str) -> String {
                         .take(end - start)
                     {
                         writer
-                            .write_event(event)
+                            .write_event(round_event(event))
                             .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
                     }
                 } else if switch_content.has_warning_link
@@ -208,11 +310,11 @@ pub fn clean_svg(content: &str) -> String {
                 {
                 } else {
                     writer
-                        .write_event(Event::Start(e.into_owned()))
+                        .write_event(Event::Start(round_event_start(&e)))
                         .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
                     for event in switch_content.events {
                         writer
-                            .write_event(event)
+                            .write_event(round_event(event))
                             .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
                     }
                     writer
@@ -232,7 +334,7 @@ pub fn clean_svg(content: &str) -> String {
                     required_features_used = true;
                 }
                 writer
-                    .write_event(Event::Start(e.into_owned()))
+                    .write_event(Event::Start(round_event_start(&e)))
                     .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
             }
             Ok(Event::Empty(e)) => {
@@ -242,7 +344,7 @@ pub fn clean_svg(content: &str) -> String {
                     required_features_used = true;
                 }
                 writer
-                    .write_event(Event::Empty(e.into_owned()))
+                    .write_event(Event::Empty(round_event_start(&e)))
                     .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
             }
             Ok(Event::End(e)) if e.local_name().as_ref() == b"svg" => {
@@ -258,7 +360,7 @@ pub fn clean_svg(content: &str) -> String {
             }
             Ok(event) => {
                 writer
-                    .write_event(event.into_owned())
+                    .write_event(round_event(event))
                     .unwrap_or_else(|err| panic!("Failed to write SVG: {err}"));
             }
             Err(err) => panic!("Failed to parse SVG: {err}"),

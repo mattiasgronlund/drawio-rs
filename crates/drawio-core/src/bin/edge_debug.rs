@@ -4,7 +4,8 @@ mod real {
     use drawio_core::model::MxCell;
     use drawio_core::parse_mxfile;
     use drawio_core::svg::{
-        DebugEdgeGeometry, DebugGraphBounds, SvgResult, debug_edge_geometry, debug_graph_bounds,
+        DebugEdgeGeometry, DebugGraphBounds, SvgResult, debug_edge_geometry,
+        debug_edge_label_rotation_from_drawio, debug_graph_bounds,
     };
     use quick_xml::Reader;
     use quick_xml::events::Event;
@@ -133,6 +134,17 @@ mod real {
         Ok(())
     }
 
+    fn run_label_steps(
+        drawio_path: PathBuf,
+        label_id: String,
+        diagram_index: usize,
+    ) -> SvgResult<()> {
+        let report = debug_edge_label_rotation_from_drawio(&drawio_path, diagram_index, &label_id)?;
+        let output = serde_json::to_string_pretty(&report).expect("serialize report");
+        println!("{output}");
+        Ok(())
+    }
+
     fn run_edge_debug(
         drawio_path: PathBuf,
         edge_id: String,
@@ -185,7 +197,8 @@ mod real {
         let Some(first) = args.next() else {
             eprintln!(
                 "usage: edge_debug bounds <drawio> [diagram_index]\n\
-                usage: edge_debug <drawio> <edge_id> <expected_svg>"
+            usage: edge_debug label-steps <drawio> <label_id> [diagram_index]\n\
+            usage: edge_debug <drawio> <edge_id> <expected_svg>"
             );
             std::process::exit(2);
         };
@@ -197,6 +210,15 @@ mod real {
                 .map(|value| value.parse::<usize>().expect("diagram_index"))
                 .unwrap_or(0);
             return run_bounds(drawio_path, diagram_index);
+        }
+        if first == "label-steps" {
+            let drawio_path = PathBuf::from(args.next().expect("drawio path"));
+            let label_id = args.next().expect("label id");
+            let diagram_index = args
+                .next()
+                .map(|value| value.parse::<usize>().expect("diagram_index"))
+                .unwrap_or(0);
+            return run_label_steps(drawio_path, label_id, diagram_index);
         }
 
         let drawio_path = PathBuf::from(first);

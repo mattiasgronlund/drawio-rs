@@ -29,6 +29,7 @@ This repository uses Codex-driven tasks. When working on tasks, follow these rul
   - `fixtures/expected/**.json`
   - `fixtures/expected/**.svg`
 - Updating fixtures is not allowed
+- It is not allowed to update any file under: fixtures
 
 ## PR conventions
 

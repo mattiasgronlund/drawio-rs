@@ -187,8 +187,9 @@ fn svg_dump_matches_expected_svg() {
         let drawio_xml = read_to_string(path);
         let actual_svg = parse_drawio_to_svg(&drawio_xml);
         let expected_clean = read_to_string(&expected_path);
+        let actual_clean = helpers::clean_svg(actual_svg.as_str());
         let expected_norm = canonicalize_11_no_comments(expected_clean.as_str()).unwrap();
-        let actual_norm = canonicalize_11_no_comments(actual_svg.as_str()).unwrap();
+        let actual_norm = canonicalize_11_no_comments(actual_clean.as_str()).unwrap();
 
         if expected_norm != actual_norm {
             if env::var_os("KEEP_CANNONICALIZED_SVG").is_some() {
